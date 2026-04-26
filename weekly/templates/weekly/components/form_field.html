@@ -1,6 +1,6 @@
-<div class="form-group">
+<div class="mb-3">
 	<label class="form-label" for="{{ id }}">{{ label }}</label>
-	{% if hint %}<span class="form-hint" id="{{ id }}_hint">{{ hint }}</span>{% endif %}
+	{% if hint %}<p class="form-text" id="{{ id }}_hint">{{ hint }}</p>{% endif %}
 	<input
 		class="form-control"
 		id="{{ id }}"

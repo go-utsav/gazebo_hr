@@ -1,23 +1,23 @@
-/* Classic GOV.UK–inspired service theme (layout and colours, not official assets). */
+/* Gazebo — GOV.UK–inspired layout; Bootstrap 5.3+ handles forms, modals, tables, buttons. */
+
 :root {
 	--govuk-blue: #005ea5;
 	--govuk-blue-dark: #003078;
-	--govuk-green: #00703c;
-	--govuk-green-dark: #002d18;
-	--text: #0b0c0c;
-	--text-secondary: #505a5f;
-	--border: #b1b4b6;
-	--focus: #ffdd00;
+	--bs-primary: #005ea5;
+	--bs-primary-rgb: 0, 94, 165;
+	--bs-link-color: #005ea5;
+	--bs-link-hover-color: #003078;
+	--bs-body-bg: #dee0e2;
+	--bs-body-color: #0b0c0c;
+	--bs-border-color: #b1b4b6;
+	--bs-success: #00703c;
+	--bs-success-rgb: 0, 112, 60;
 	--page-bg: #dee0e2;
+	--text-secondary: #505a5f;
+	--focus: #ffdd00;
+	--font: "GDS Transport", "Helvetica Neue", Helvetica, Arial, sans-serif;
 	--panel-bg: #ffffff;
 	--sidebar-bg: #f3f2f1;
-	--font: "GDS Transport", "Helvetica Neue", Helvetica, Arial, sans-serif;
-}
-
-*,
-*::before,
-*::after {
-	box-sizing: border-box;
 }
 
 html {
@@ -30,7 +30,7 @@ body {
 	font-family: var(--font);
 	font-size: 19px;
 	line-height: 1.3157894737;
-	color: var(--text);
+	color: var(--bs-body-color);
 	background: var(--page-bg);
 }
 
@@ -41,21 +41,42 @@ body {
 	}
 }
 
-a:link,
-a:visited {
+a:not(.btn):link,
+a:not(.btn):visited {
 	color: var(--govuk-blue);
 }
 
-a:hover {
+a:not(.btn):hover {
 	color: var(--govuk-blue-dark);
 }
 
 a:focus {
 	outline: 3px solid transparent;
-	color: var(--text);
-	background-color: var(--focus);
-	box-shadow: 0 -2px var(--focus), 0 4px var(--text);
+	color: #0b0c0c !important;
+	background-color: var(--focus) !important;
+	box-shadow: 0 -2px #ffdd00, 0 4px #0b0c0c !important;
 	text-decoration: none;
+}
+
+/* GOV service focus for Bootstrap buttons (override ring) */
+.btn.btn-success:focus,
+.btn.btn-success:focus-visible,
+.btn.btn-outline-secondary:focus,
+.btn.btn-outline-secondary:focus-visible,
+.btn.btn-link:focus,
+.btn.btn-link:focus-visible,
+.btn.btn-outline-primary:focus,
+.btn.btn-outline-primary:focus-visible {
+	color: #0b0c0c !important;
+	background-color: var(--focus) !important;
+	border-color: #0b0c0c;
+	box-shadow: 0 0 0 3px #ffdd00, inset 0 0 0 2px #0b0c0c;
+	outline: none;
+}
+
+.btn.btn-link:focus,
+.btn.btn-link:focus-visible {
+	box-shadow: 0 -2px #ffdd00, 0 4px #0b0c0c;
 }
 
 .skip-link {
@@ -64,7 +85,7 @@ a:focus {
 	z-index: 100;
 	padding: 0.5rem 1rem;
 	background: var(--focus);
-	color: var(--text);
+	color: #0b0c0c;
 	font-weight: 700;
 }
 
@@ -73,9 +94,8 @@ a:focus {
 	top: 0;
 }
 
-/* Top black bar (classic service header strip) */
 .global-bar {
-	background: var(--text);
+	background: #0b0c0c;
 	color: #fff;
 	font-size: 14px;
 	line-height: 1.1428571429;
@@ -86,7 +106,6 @@ a:focus {
 	padding: 0.25rem 1rem;
 }
 
-/* Blue header */
 .site-header {
 	background: var(--govuk-blue);
 	color: #fff;
@@ -103,19 +122,15 @@ a:focus {
 	flex-wrap: wrap;
 }
 
-.site-header a:link,
-.site-header a:visited {
+.site-header a.link-button:link,
+.site-header a.link-button:visited,
+.site-header a {
 	color: #fff;
 	text-decoration: underline;
-	text-underline-offset: 0.1em;
 }
 
 .site-header a:hover {
 	color: #fff;
-}
-
-.site-header a:focus {
-	color: var(--text);
 }
 
 .brand {
@@ -128,7 +143,6 @@ a:focus {
 .brand:link,
 .brand:visited {
 	color: #fff;
-	text-decoration: none;
 }
 
 .brand:hover .brand__text {
@@ -170,20 +184,17 @@ a:focus {
 }
 
 .link-button:focus {
-	outline: 3px solid var(--focus);
-	color: var(--text);
-	background: var(--focus);
-	box-shadow: 0 2px 0 var(--text);
+	color: #0b0c0c !important;
+	background: #ffdd00;
+	box-shadow: 0 2px 0 #0b0c0c;
 }
 
-/* Full-width wrapper */
 .wrapper {
 	width: 100%;
 	max-width: 100%;
 	padding: 0;
 }
 
-/* Main content area (public / login) */
 .main-grid {
 	width: 100%;
 	padding: 1.5rem 1rem 3rem;
@@ -195,7 +206,6 @@ a:focus {
 	}
 }
 
-/* Dashboard: sidebar + content */
 .layout-dashboard {
 	display: flex;
 	width: 100%;
@@ -207,7 +217,7 @@ a:focus {
 	flex: 0 0 260px;
 	max-width: 100%;
 	background: var(--sidebar-bg);
-	border-right: 1px solid var(--border);
+	border-right: 1px solid var(--bs-border-color);
 	padding: 1rem 0;
 }
 
@@ -225,7 +235,7 @@ a:focus {
 	.layout-dashboard__sidebar {
 		flex-basis: auto;
 		border-right: 0;
-		border-bottom: 1px solid var(--border);
+		border-bottom: 1px solid var(--bs-border-color);
 	}
 }
 
@@ -248,7 +258,7 @@ a:focus {
 .side-nav__link {
 	display: block;
 	padding: 0.75rem 1rem;
-	color: var(--text);
+	color: var(--bs-body-color);
 	text-decoration: none;
 	border-left: 4px solid transparent;
 	font-weight: 400;
@@ -268,33 +278,11 @@ a:focus {
 
 .side-nav__link:focus {
 	outline: none;
-	color: var(--text);
-	background: var(--focus);
-	box-shadow: inset 0 0 0 4px var(--text);
+	color: #0b0c0c;
+	background: #ffdd00;
+	box-shadow: inset 0 0 0 4px #0b0c0c;
 }
 
-/* Panels / cards */
-.panel {
-	background: var(--panel-bg);
-	border: 1px solid var(--border);
-	padding: 1.5rem;
-	max-width: 40rem;
-	width: 100%;
-}
-
-.panel--wide {
-	max-width: 100%;
-}
-
-.panel > :first-child {
-	margin-top: 0;
-}
-
-.panel > :last-child {
-	margin-bottom: 0;
-}
-
-/* Typography */
 .heading-xl {
 	font-size: 2rem;
 	line-height: 1.09375;
@@ -316,102 +304,8 @@ a:focus {
 	max-width: 36rem;
 }
 
-/* Form controls (reusable) */
-.form-group {
-	margin-bottom: 1.25rem;
-}
-
-.form-label {
-	display: block;
-	font-weight: 700;
-	margin-bottom: 0.25rem;
-}
-
-.form-hint {
-	display: block;
-	margin-bottom: 0.25rem;
-	color: var(--text-secondary);
-	font-size: 16px;
-}
-
-.form-control {
-	width: 100%;
-	max-width: 28rem;
-	font-family: inherit;
-	font-size: inherit;
-	line-height: inherit;
-	padding: 0.5rem 0.75rem;
-	border: 2px solid var(--text);
-	margin: 0;
-}
-
-.form-control:focus {
-	outline: 3px solid var(--focus);
-	outline-offset: 0;
-	box-shadow: inset 0 0 0 2px;
-}
-
-.error-summary {
-	border: 4px solid #d4351c;
-	padding: 1rem;
-	margin-bottom: 1.5rem;
+.container-narrow {
 	max-width: 40rem;
-}
-
-.error-summary__title {
-	font-size: 1.125rem;
-	font-weight: 700;
-	margin: 0 0 0.5rem;
-}
-
-/* Buttons */
-.btn {
-	font-family: inherit;
-	font-size: 19px;
-	line-height: 1;
-	font-weight: 400;
-	margin: 0 0 1rem;
-	padding: 0.5rem 1rem;
-	border: 2px solid transparent;
-	cursor: pointer;
-	text-decoration: none;
-	display: inline-block;
-	text-align: center;
-}
-
-.btn:focus {
-	outline: 3px solid var(--focus);
-	outline-offset: 0;
-	box-shadow: inset 0 0 0 2px var(--text);
-}
-
-.btn--primary {
-	background: var(--govuk-green);
-	color: #fff;
-	box-shadow: 0 2px 0 var(--govuk-green-dark);
-}
-
-.btn--primary:hover {
-	background: #005a30;
-}
-
-.btn--secondary {
-	background: var(--panel-bg);
-	color: var(--text);
-	border-color: var(--border);
-	box-shadow: 0 2px 0 #929191;
-}
-
-.btn--secondary:hover {
-	background: #e8e8e8;
-}
-
-.button-group {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.75rem 1rem;
-	align-items: center;
-	margin-top: 1rem;
 }
 
 .center-narrow {
@@ -420,10 +314,77 @@ a:focus {
 	width: 100%;
 }
 
+/* Help modal (Bootstrap) — prose in body */
+.help-prose h2 {
+	font-size: 1.25rem;
+	margin: 1.25rem 0 0.5rem;
+}
+
+.help-prose h2:first-of-type,
+.help-prose > :first-child {
+	margin-top: 0;
+}
+
+.help-prose ol,
+.help-prose ul {
+	margin: 0.5rem 0 0;
+	padding-left: 1.5rem;
+}
+
+.help-prose li {
+	margin-bottom: 0.35rem;
+}
+
+.help-prose p {
+	margin: 0.5rem 0 0;
+}
+
 .footer-meta {
-	border-top: 1px solid var(--border);
+	border-top: 1px solid var(--bs-border-color);
 	background: var(--sidebar-bg);
 	padding: 1rem;
 	font-size: 16px;
 	color: var(--text-secondary);
+}
+
+.footer-meta__inner {
+	margin: 0;
+}
+
+.weekly-form {
+	display: grid;
+	gap: 0.75rem;
+	max-width: 680px;
+}
+
+.modal-header .btn-close {
+	filter: none;
+}
+
+/* No backdrop: no dimmer; let clicks through outside the dialog */
+.modal[data-bs-backdrop="false"] {
+	pointer-events: none;
+}
+.modal[data-bs-backdrop="false"] .modal-dialog {
+	pointer-events: auto;
+}
+.modal[data-bs-backdrop="false"] .modal-content {
+	box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.2);
+}
+
+.weekly-preview-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	align-items: flex-end;
+	margin-bottom: 0.75rem;
+}
+
+.weekly-preview-toolbar__field {
+	font-size: 0.875rem;
+}
+
+.weekly-preview-toolbar__field--grow {
+	flex: 1 1 12rem;
+	min-width: 8rem;
 }
