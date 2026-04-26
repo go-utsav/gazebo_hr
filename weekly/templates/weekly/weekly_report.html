@@ -1,4 +1,9 @@
 {% extends "weekly/dashboard_base.html" %}
+{% block extra_head %}
+{% if weekly_analytics %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+{% endif %}
+{% endblock %}
 {% block dashboard_content %}
 <h1 class="heading-xl">{{ page_heading }}</h1>
 <p class="lead">Upload employee-hours and contracted-hours files, run calculations, and export the result as Excel.</p>
@@ -99,6 +104,110 @@
 <div class="card shadow-sm mt-3">
 	<div class="card-body">
 		<p class="mb-0"><strong>Rows:</strong> {{ summary.total_rows }} | <strong>Agency:</strong> {{ summary.agency_rows }} | <strong>Gazebo:</strong> {{ summary.gazebo_rows }} | <strong>Total paid hours:</strong> {{ summary.total_paid_hours }}</p>
+	</div>
+</div>
+{% endif %}
+
+{% if weekly_analytics %}
+{{ weekly_analytics.chart|json_script:"weekly-analytics-chart-data" }}
+{{ weekly_analytics.extra_charts|json_script:"weekly-analytics-extra-data" }}
+<div class="row g-3 mt-3">
+	<div class="col-lg-5">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">Hours distribution</h2>
+				<p class="small text-secondary mb-3">Headcount by total paid hours band (all {{ weekly_analytics.total_people }} rows).</p>
+				<div class="weekly-analytics-chart-wrap">
+					<canvas id="weekly-hours-chart" aria-label="Bar chart of employee counts by hours band"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="col-lg-7">
+		<div class="card shadow-sm h-100 border-start border-warning border-3">
+			<div class="card-body">
+				<h2 class="h5 mb-2">60+ hours</h2>
+				<p class="small text-secondary mb-3">
+					<strong>{{ weekly_analytics.over_60_count }}</strong> people at <strong>60 hours or more</strong> total paid (showing up to 200 below).
+				</p>
+				{% if weekly_analytics.over_60 %}
+				<div class="table-responsive" style="max-height: 22rem; overflow-y: auto;">
+					<table class="table table-sm table-striped table-hover mb-0">
+						<thead class="table-light sticky-top">
+							<tr>
+								<th scope="col">Name</th>
+								<th scope="col">Category</th>
+								<th scope="col">SageNo</th>
+								<th scope="col" class="text-end">Total paid h</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for row in weekly_analytics.over_60 %}
+							<tr>
+								<td>{{ row.Name }}</td>
+								<td>{{ row.Category }}</td>
+								<td>{{ row.SageNo }}</td>
+								<td class="text-end fw-semibold">{{ row.TotalPaidHours|floatformat:2 }}</td>
+							</tr>
+							{% endfor %}
+						</tbody>
+					</table>
+				</div>
+				{% else %}
+				<p class="mb-0 text-secondary">No one at 60+ hours in this run.</p>
+				{% endif %}
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="row g-3 mt-3">
+	<div class="col-lg-4">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">Category summary — paid hours</h2>
+				<p class="small text-secondary mb-3">Share of <strong>total paid hours</strong> by payroll category (same idea as the Excel &ldquo;Category summary&rdquo; sheet). Top {{ weekly_analytics.extra_charts.category.labels|length }} slice(s); smaller categories roll into <strong>Other</strong>.</p>
+				<div class="weekly-analytics-chart-wrap">
+					<canvas id="weekly-category-doughnut" aria-label="Doughnut chart of paid hours by category"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="col-lg-4">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">People per category</h2>
+				<p class="small text-secondary mb-3">Headcount by category — polar view so you see both the big groups and the long tail.</p>
+				<div class="weekly-analytics-chart-wrap">
+					<canvas id="weekly-category-polar" aria-label="Polar chart of headcount by category"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="col-lg-4">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">Gazebo vs agency — total paid</h2>
+				<p class="small text-secondary mb-3">One stacked bar: <strong>Gazebo (EMP)</strong> vs <strong>Agency</strong> total paid hours this run.</p>
+				<div class="weekly-analytics-chart-wrap weekly-analytics-chart-wrap--thin">
+					<canvas id="weekly-total-split-bar" aria-label="Stacked bar of Gazebo versus agency total hours"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="row g-3 mt-3">
+	<div class="col-12">
+		<div class="card shadow-sm">
+			<div class="card-body">
+				<h2 class="h5 mb-2">EMP vs Agency — hour bands</h2>
+				<p class="small text-secondary mb-3">Side-by-side bars matching the Excel <strong>EMP Agency Total</strong> sheet: Gazebo (EMP) and Agency across basic, overtime bands, annual, and total.</p>
+				<div class="weekly-analytics-chart-wrap weekly-analytics-chart-wrap--tall">
+					<canvas id="weekly-emp-agency-grouped" aria-label="Grouped bar chart EMP versus Agency by hour band"></canvas>
+				</div>
+			</div>
+		</div>
 	</div>
 </div>
 {% endif %}
@@ -233,6 +342,165 @@
 			applyFilter();
 		}
 	});
+})();
+(function () {
+	var dataEl = document.getElementById('weekly-analytics-chart-data');
+	var canvas = document.getElementById('weekly-hours-chart');
+	if (!dataEl || !canvas || typeof Chart === 'undefined') return;
+	var payload;
+	try {
+		payload = JSON.parse(dataEl.textContent);
+	} catch (e) {
+		return;
+	}
+	var labels = payload.labels || [];
+	var counts = payload.counts || [];
+	new Chart(canvas.getContext('2d'), {
+		type: 'bar',
+		data: {
+			labels: labels,
+			datasets: [{
+				label: 'People',
+				data: counts,
+				backgroundColor: ['#5694ca', '#85994b', '#f47738', '#b10e1e'],
+				borderWidth: 0
+			}]
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: {
+				legend: { display: false }
+			},
+			scales: {
+				y: {
+					beginAtZero: true,
+					ticks: { precision: 0 }
+				}
+			}
+		}
+	});
+})();
+(function () {
+	var dataEl = document.getElementById('weekly-analytics-extra-data');
+	if (!dataEl || typeof Chart === 'undefined') return;
+	var extra;
+	try {
+		extra = JSON.parse(dataEl.textContent);
+	} catch (e) {
+		return;
+	}
+	var cat = extra.category;
+	var ea = extra.empAgency;
+	var split = extra.totalPaidSplit;
+	if (!cat || !ea || !split) return;
+
+	var doughnutEl = document.getElementById('weekly-category-doughnut');
+	if (doughnutEl && cat.labels && cat.labels.length) {
+		new Chart(doughnutEl.getContext('2d'), {
+			type: 'doughnut',
+			data: {
+				labels: cat.labels,
+				datasets: [{
+					data: cat.hours,
+					backgroundColor: cat.colors,
+					borderWidth: 1,
+					borderColor: '#fff'
+				}]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: {
+					legend: { position: 'bottom' },
+					tooltip: {
+						callbacks: {
+							afterLabel: function (ctx) {
+								var n = cat.counts && cat.counts[ctx.dataIndex];
+								return n != null ? n + ' people' : '';
+							}
+						}
+					}
+				}
+			}
+		});
+	}
+
+	var polarEl = document.getElementById('weekly-category-polar');
+	if (polarEl && cat.labels && cat.labels.length) {
+		new Chart(polarEl.getContext('2d'), {
+			type: 'polarArea',
+			data: {
+				labels: cat.labels,
+				datasets: [{
+					data: cat.counts,
+					backgroundColor: cat.colors.map(function (c) { return c + 'cc'; }),
+					borderWidth: 1,
+					borderColor: '#fff'
+				}]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: {
+					legend: { position: 'right' }
+				},
+				scales: {
+					r: {
+						beginAtZero: true,
+						ticks: { precision: 0 }
+					}
+				}
+			}
+		});
+	}
+
+	var splitEl = document.getElementById('weekly-total-split-bar');
+	if (splitEl) {
+		new Chart(splitEl.getContext('2d'), {
+			type: 'bar',
+			data: {
+				labels: ['Total paid hours'],
+				datasets: [
+					{ label: 'Gazebo (EMP)', data: [split.emp], backgroundColor: '#005ea5', borderWidth: 0 },
+					{ label: 'Agency', data: [split.agency], backgroundColor: '#f47738', borderWidth: 0 }
+				]
+			},
+			options: {
+				indexAxis: 'y',
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: { legend: { position: 'bottom' } },
+				scales: {
+					x: { stacked: true, beginAtZero: true },
+					y: { stacked: true, display: false }
+				}
+			}
+		});
+	}
+
+	var groupedEl = document.getElementById('weekly-emp-agency-grouped');
+	if (groupedEl && ea.bandLabels && ea.bandLabels.length) {
+		new Chart(groupedEl.getContext('2d'), {
+			type: 'bar',
+			data: {
+				labels: ea.bandLabels,
+				datasets: [
+					{ label: 'Gazebo (EMP)', data: ea.emp, backgroundColor: '#005ea5', borderWidth: 0 },
+					{ label: 'Agency', data: ea.agency, backgroundColor: '#f47738', borderWidth: 0 }
+				]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: { legend: { position: 'top' } },
+				scales: {
+					x: { grid: { display: false } },
+					y: { beginAtZero: true }
+				}
+			}
+		});
+	}
 })();
 </script>
 {% endblock %}

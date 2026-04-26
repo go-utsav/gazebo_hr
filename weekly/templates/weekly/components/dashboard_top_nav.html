@@ -1,0 +1,8 @@
+<nav class="service-nav" aria-label="Dashboard sections">
+	<div class="service-nav__inner">
+		<a class="service-nav__link{% if request.resolver_match.url_name == 'dashboard' %} service-nav__link--current{% endif %}" href="{% url 'weekly:dashboard' %}">Dashboard</a>
+		<a class="service-nav__link{% if request.resolver_match.url_name == 'weekly_report' %} service-nav__link--current{% endif %}" href="{% url 'weekly:weekly_report' %}">Weekly report</a>
+		<a class="service-nav__link{% if request.resolver_match.url_name == 'monthly_report' %} service-nav__link--current{% endif %}" href="{% url 'weekly:monthly_report' %}">Monthly report</a>
+		<a class="service-nav__link{% if request.resolver_match.url_name == 'employee_hour_contracts' %} service-nav__link--current{% endif %}" href="{% url 'weekly:employee_hour_contracts' %}">Employee hour contracts</a>
+	</div>
+</nav>
