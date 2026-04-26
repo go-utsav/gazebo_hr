@@ -157,7 +157,7 @@ def _parse_employee_legacy(rows: list[list[str]]) -> list[dict[str, Any]]:
     expects_category = True
     result: list[dict[str, Any]] = []
     idx = 0
-    while idx < 250 and idx + 6 < len(rows):
+    while idx + 6 < len(rows):
         row = rows[6 + idx]
         col_a = row[0] if row else ""
         if col_a:
@@ -202,6 +202,58 @@ def _find_header_index(headers: list[str], *candidates: str) -> int:
     return -1
 
 
+def _contract_hrs_value_in_row(row: list[str]) -> float | None:
+    for c, cell in enumerate(row):
+        n = _normalize_header(cell)
+        if n in ("contracthrs", "contracthours", "contracthr", "contractedhours"):
+            if c + 1 < len(row):
+                return _parse_decimal(row[c + 1])
+            return 0.0
+    return None
+
+
+def _parse_clockrite_contract_report(rows: list[list[str]]) -> tuple[dict[int, float], dict[str, float]]:
+    """
+    Clockrite "Employee Details - Advanced" XLS: repeated blocks with label rows
+    (e.g. "Contract Hrs" and "Payroll Number" in separate rows, not one header table).
+    Join key: Payroll Number value == employee file Pay ID (SageNo).
+    """
+    by_payroll: dict[int, float] = {}
+    by_name: dict[str, float] = {}
+    for r, row in enumerate(rows):
+        for c, cell in enumerate(row):
+            if _normalize_header(cell) != "payrollnumber":
+                continue
+            if c + 1 >= len(row):
+                continue
+            pay_no = _parse_int(row[c + 1])
+            if pay_no is None or pay_no == 0:
+                continue
+            hours = 0.0
+            for back in range(1, 25):
+                if r - back < 0:
+                    break
+                prev = rows[r - back]
+                got = _contract_hrs_value_in_row(prev)
+                if got is not None:
+                    hours = got
+                    break
+            by_payroll[pay_no] = hours
+            for back in range(1, 30):
+                if r - back < 0:
+                    break
+                pr = rows[r - back]
+                if not pr:
+                    continue
+                a0 = _to_text(pr[0])
+                if a0.isdigit() and len(a0) < 6 and len(pr) > 1:
+                    name_key = _to_text(pr[1]).upper()
+                    if name_key:
+                        by_name[name_key] = hours
+                    break
+    return by_payroll, by_name
+
+
 def parse_contracted_hours(file_obj: Any) -> tuple[dict[int, float], dict[str, float]]:
     df = _load_sheet(file_obj)
     rows = [[_to_text(v) for v in rec] for rec in df.values.tolist()]
@@ -213,31 +265,35 @@ def parse_contracted_hours(file_obj: Any) -> tuple[dict[int, float], dict[str, f
     contract_col = -1
     name_col = -1
     for r, row in enumerate(rows[:80]):
-        payroll_col = _find_header_index(row, "payrollnumber", "payrollno", "payroll")
-        contract_col = _find_header_index(row, "contracthrs", "contracthours", "contracthr", "contractedhours")
-        name_col = _find_header_index(row, "clockname", "name", "employeename")
-        if payroll_col >= 0 and contract_col >= 0:
+        pc = _find_header_index(row, "payrollnumber", "payrollno", "payroll")
+        cc = _find_header_index(row, "contracthrs", "contracthours", "contracthr", "contractedhours")
+        if pc >= 0 and cc >= 0:
             header_row = r
+            payroll_col = pc
+            contract_col = cc
+            name_col = _find_header_index(row, "clockname", "name", "employeename")
             break
 
-    if header_row < 0:
-        return {}, {}
+    if header_row >= 0:
+        by_payroll: dict[int, float] = {}
+        by_name: dict[str, float] = {}
+        for row in rows[header_row + 1 :]:
+            if _row_contains_date_range(row):
+                break
+            hours = _parse_decimal(row[contract_col] if contract_col < len(row) else "")
+            if hours == 0.0:
+                continue
+            pay_no = _parse_int(row[payroll_col] if payroll_col < len(row) else "")
+            if pay_no is not None:
+                by_payroll[pay_no] = hours
+            if name_col >= 0 and name_col < len(row):
+                name = _to_text(row[name_col]).upper()
+                if name:
+                    by_name[name] = hours
+        if by_payroll or by_name:
+            return by_payroll, by_name
 
-    by_payroll: dict[int, float] = {}
-    by_name: dict[str, float] = {}
-    for row in rows[header_row + 1 :]:
-        hours = _parse_decimal(row[contract_col] if contract_col < len(row) else "")
-        if hours == 0.0:
-            continue
-        pay_no = _parse_int(row[payroll_col] if payroll_col < len(row) else "")
-        if pay_no is not None:
-            by_payroll[pay_no] = hours
-        if name_col >= 0 and name_col < len(row):
-            name = _to_text(row[name_col]).upper()
-            if name:
-                by_name[name] = hours
-
-    return by_payroll, by_name
+    return _parse_clockrite_contract_report(rows)
 
 
 def calculate_payroll(employee_rows: list[dict[str, Any]], contracted_file_obj: Any) -> PayrollResult:

@@ -35,7 +35,23 @@
 {% endif %}
 
 {% if preview_rows %}
-<div class="panel panel--wide" style="margin-top:1rem;overflow:auto">
+<div class="panel panel--wide" style="margin-top:1rem;overflow:auto" id="weekly-report-preview">
+	<div class="weekly-preview__toolbar" style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-end;margin-bottom:.75rem">
+		<label style="display:flex;flex-direction:column;gap:.25rem;font-size:.875rem">
+			Category
+			<select id="weekly-preview-category" class="weekly-preview__select" style="min-width:12rem;padding:.35rem .5rem;border:1px solid #ccc;border-radius:4px">
+				<option value="">All categories</option>
+			</select>
+		</label>
+		<label style="display:flex;flex-direction:column;gap:.25rem;font-size:.875rem;flex:1;min-width:12rem">
+			Search
+			<input type="search" id="weekly-preview-search" class="weekly-preview__search" placeholder="Name, SageNo, hours…" autocomplete="off" style="width:100%;padding:.35rem .5rem;border:1px solid #ccc;border-radius:4px">
+		</label>
+		<div class="button-group" style="align-self:flex-end">
+			<button type="button" class="btn btn--primary" id="weekly-preview-search-btn">Search</button>
+			<button type="button" class="btn btn--secondary" id="weekly-preview-clear-btn">Clear</button>
+		</div>
+	</div>
 	<table style="width:100%;border-collapse:collapse">
 		<thead>
 			<tr>
@@ -53,7 +69,7 @@
 		</thead>
 		<tbody>
 			{% for row in preview_rows %}
-			<tr>
+			<tr class="weekly-preview__row" data-category="{{ row.Category }}">
 				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.Name }}</td>
 				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.Category }}</td>
 				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.SageNo }}</td>
@@ -68,6 +84,56 @@
 			{% endfor %}
 		</tbody>
 	</table>
+	<script>
+	(function () {
+		var root = document.getElementById('weekly-report-preview');
+		if (!root) return;
+		var tbody = root.querySelector('tbody');
+		var select = document.getElementById('weekly-preview-category');
+		var input = document.getElementById('weekly-preview-search');
+		var btnSearch = document.getElementById('weekly-preview-search-btn');
+		var btnClear = document.getElementById('weekly-preview-clear-btn');
+		if (!tbody || !select || !input || !btnSearch || !btnClear) return;
+
+		var rows = tbody.querySelectorAll('tr.weekly-preview__row');
+		var cats = new Set();
+		rows.forEach(function (tr) {
+			var c = tr.getAttribute('data-category') || '';
+			if (c) cats.add(c);
+		});
+		Array.from(cats).sort(function (a, b) { return a.localeCompare(b); }).forEach(function (c) {
+			var opt = document.createElement('option');
+			opt.value = c;
+			opt.textContent = c;
+			select.appendChild(opt);
+		});
+
+		function applyFilter() {
+			var q = (input.value || '').trim().toLowerCase();
+			var cat = select.value;
+			rows.forEach(function (tr) {
+				var okCat = !cat || (tr.getAttribute('data-category') || '') === cat;
+				var okQ = !q || (tr.textContent || '').toLowerCase().indexOf(q) !== -1;
+				tr.style.display = okCat && okQ ? '' : 'none';
+			});
+		}
+
+		function clearFilter() {
+			select.selectedIndex = 0;
+			input.value = '';
+			rows.forEach(function (tr) { tr.style.display = ''; });
+		}
+
+		btnSearch.addEventListener('click', applyFilter);
+		btnClear.addEventListener('click', clearFilter);
+		input.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				applyFilter();
+			}
+		});
+	})();
+	</script>
 </div>
 {% endif %}
 {% endblock %}
