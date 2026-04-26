@@ -1,8 +1,73 @@
 {% extends "weekly/dashboard_base.html" %}
 {% block dashboard_content %}
 <h1 class="heading-xl">{{ page_heading }}</h1>
-<p class="lead">Weekly payroll and hours summary will appear here.</p>
+<p class="lead">Upload employee-hours and contracted-hours files, run calculations, and export the result as Excel.</p>
 <div class="panel panel--wide">
-	<p style="margin:0">Placeholder content for the weekly report.</p>
+	<form method="post" enctype="multipart/form-data" style="display:grid;gap:.75rem;max-width:680px">
+		{% csrf_token %}
+		<label>
+			Employee hours file (.xls/.xlsx)
+			<input type="file" name="employee_file" accept=".xls,.xlsx" required>
+		</label>
+		<label>
+			Contracted hours file (.xls/.xlsx)
+			<input type="file" name="contracted_file" accept=".xls,.xlsx" required>
+		</label>
+		<div class="button-group">
+			{% include "weekly/components/button_submit.html" with label="Process files" variant="primary" %}
+			<a class="btn btn--secondary" href="{% url 'weekly:weekly_download' %}">Download Excel</a>
+		</div>
+	</form>
 </div>
+
+{% if messages %}
+<div class="panel panel--wide" style="margin-top:1rem">
+	{% for message in messages %}
+		<p style="margin:.25rem 0">{{ message }}</p>
+	{% endfor %}
+</div>
+{% endif %}
+
+{% if summary.total_rows %}
+<div class="panel panel--wide" style="margin-top:1rem">
+	<p style="margin:0"><strong>Rows:</strong> {{ summary.total_rows }} | <strong>Agency:</strong> {{ summary.agency_rows }} | <strong>Gazebo:</strong> {{ summary.gazebo_rows }} | <strong>Total (non A-):</strong> {{ summary.total_non_agency }}</p>
+</div>
+{% endif %}
+
+{% if preview_rows %}
+<div class="panel panel--wide" style="margin-top:1rem;overflow:auto">
+	<table style="width:100%;border-collapse:collapse">
+		<thead>
+			<tr>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">Name</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">Category</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">SageNo</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">BasicHours</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">MonFriOvertime</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">SatSunOvertime</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">AnnualHoliday</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">TotalPaidHours</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">ContractedHours</th>
+				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">Overtime</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for row in preview_rows %}
+			<tr>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.Name }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.Category }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.SageNo }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.BasicHours }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.MonFriOvertime }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.SatSunOvertime }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.AnnualHoliday }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.TotalPaidHours }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.ContractedHours }}</td>
+				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.Overtime }}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{% endif %}
 {% endblock %}
