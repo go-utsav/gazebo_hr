@@ -11,6 +11,7 @@ from .payroll_service import (
 	build_excel_bytes,
 	calculate_payroll,
 	parse_employee_hours,
+	total_paid_hours_from_rows,
 )
 
 
@@ -100,7 +101,7 @@ def weekly_report(request: HttpRequest):
 			'rows': payroll_result.rows,
 			'summary': {
 				'total_rows': len(payroll_result.rows),
-				'total_non_agency': payroll_result.total_paid_hours_non_agency,
+				'total_paid_hours': payroll_result.total_paid_hours,
 				'agency_rows': len(payroll_result.agency_rows),
 				'gazebo_rows': len(payroll_result.gazebo_rows),
 			},
@@ -160,16 +161,11 @@ def download_weekly_excel(request: HttpRequest):
 
 	agency_rows = [r for r in rows if str(r.get('Category', '')).strip().upper() in AGENCY_CATEGORIES]
 	gazebo_rows = [r for r in rows if str(r.get('Category', '')).strip().upper() not in AGENCY_CATEGORIES]
-	total_non_agency = sum(
-		float(r.get('TotalPaidHours', 0.0))
-		for r in rows
-		if not str(r.get('Category', '')).startswith('A-')
-	)
 	payroll_result = PayrollResult(
 		rows=rows,
 		agency_rows=agency_rows,
 		gazebo_rows=gazebo_rows,
-		total_paid_hours_non_agency=round(total_non_agency, 2),
+		total_paid_hours=total_paid_hours_from_rows(rows),
 	)
 	file_bytes = build_excel_bytes(payroll_result)
 	response = HttpResponse(

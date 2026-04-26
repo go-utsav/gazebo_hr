@@ -29,7 +29,12 @@ class PayrollResult:
     rows: list[dict[str, Any]]
     agency_rows: list[dict[str, Any]]
     gazebo_rows: list[dict[str, Any]]
-    total_paid_hours_non_agency: float
+    total_paid_hours: float
+
+
+def total_paid_hours_from_rows(rows: list[dict[str, Any]]) -> float:
+    """Sum TotalPaidHours across all employee rows (includes every category, including A- prefix)."""
+    return round(sum(float(r.get("TotalPaidHours", 0.0)) for r in rows), 2)
 
 
 def _normalize_header(text: str) -> str:
@@ -311,29 +316,64 @@ def calculate_payroll(employee_rows: list[dict[str, Any]], contracted_file_obj: 
 
     agency_rows = [r for r in employee_rows if str(r["Category"]).strip().upper() in AGENCY_CATEGORIES]
     gazebo_rows = [r for r in employee_rows if str(r["Category"]).strip().upper() not in AGENCY_CATEGORIES]
-    total_non_agency = sum(float(r["TotalPaidHours"]) for r in employee_rows if not str(r["Category"]).startswith("A-"))
+    all_hours = total_paid_hours_from_rows(employee_rows)
 
     return PayrollResult(
         rows=employee_rows,
         agency_rows=agency_rows,
         gazebo_rows=gazebo_rows,
-        total_paid_hours_non_agency=round(total_non_agency, 2),
+        total_paid_hours=all_hours,
     )
+
+
+def _build_analysis_dataframe(all_df: pd.DataFrame) -> pd.DataFrame:
+    if all_df.empty:
+        return pd.DataFrame(columns=["Category", "BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"])
+    return (
+        all_df.groupby("Category", dropna=False)[["BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"]]
+        .sum()
+        .reset_index()
+    )
+
+
+def _append_grand_total_row_openpyxl(ws, analysis_df: pd.DataFrame, start_row: int) -> int:
+    """Write 'Grand total' and column sums. Returns one past the last row written."""
+    if analysis_df.empty:
+        return start_row
+    num_cols = ["BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"]
+    r = start_row
+    ws.cell(r, 1, "Grand total")
+    for i, col in enumerate(num_cols, start=2):
+        ws.cell(r, i, float(analysis_df[col].sum()))
+    return r + 1
+
+
+def _append_category_breakdown_block(ws, analysis_df: pd.DataFrame, start_row: int) -> int:
+    """Write analysis headers, category rows, blank row, and grand total. Returns one past the last row."""
+    if analysis_df.empty:
+        return start_row
+    headers = list(analysis_df.columns)
+    r = start_row
+    for c, h in enumerate(headers, start=1):
+        ws.cell(r, c, h)
+    r += 1
+    for _, row in analysis_df.iterrows():
+        for c, h in enumerate(headers, start=1):
+            v = row[h]
+            if h == "Category":
+                ws.cell(r, c, "" if pd.isna(v) else str(v))
+            else:
+                ws.cell(r, c, 0.0 if pd.isna(v) else float(v))
+        r += 1
+    r += 1
+    return _append_grand_total_row_openpyxl(ws, analysis_df, r)
 
 
 def build_excel_bytes(result: PayrollResult) -> bytes:
     all_df = pd.DataFrame(result.rows)
     agency_df = pd.DataFrame(result.agency_rows)
     gazebo_df = pd.DataFrame(result.gazebo_rows)
-
-    if all_df.empty:
-        analysis_df = pd.DataFrame(columns=["Category", "BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"])
-    else:
-        analysis_df = (
-            all_df.groupby("Category", dropna=False)[["BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"]]
-            .sum()
-            .reset_index()
-        )
+    analysis_df = _build_analysis_dataframe(all_df)
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -341,5 +381,15 @@ def build_excel_bytes(result: PayrollResult) -> bytes:
         agency_df.to_excel(writer, sheet_name="Agency Employee", index=False)
         gazebo_df.to_excel(writer, sheet_name="Gazebo Employee", index=False)
         analysis_df.to_excel(writer, sheet_name="Analysis", index=False)
+
+        if not analysis_df.empty:
+            ws_all = writer.book["All Data"]
+            all_data_start = int(ws_all.max_row) + 2
+            _append_category_breakdown_block(ws_all, analysis_df, all_data_start)
+
+            ws_an = writer.book["Analysis"]
+            an_start = int(ws_an.max_row) + 2
+            _append_grand_total_row_openpyxl(ws_an, analysis_df, an_start)
+
     output.seek(0)
     return output.getvalue()

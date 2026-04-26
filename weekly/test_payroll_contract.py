@@ -4,7 +4,16 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from .payroll_service import calculate_payroll, parse_contracted_hours, parse_employee_hours
+from .payroll_service import calculate_payroll, parse_contracted_hours, parse_employee_hours, total_paid_hours_from_rows
+
+class TotalPaidHoursFromRowsTest(unittest.TestCase):
+    def test_sums_including_a_prefix(self) -> None:
+        rows = [
+            {"TotalPaidHours": 4.0, "Category": "A-EL PROD"},
+            {"TotalPaidHours": 3.5, "Category": "D-STAFF"},
+        ]
+        self.assertEqual(total_paid_hours_from_rows(rows), 7.5)
+
 
 _DATA = Path(__file__).resolve().parent.parent / "data"
 _CLOCKRITE = _DATA / "Employee contract hours - clockrite.xls"

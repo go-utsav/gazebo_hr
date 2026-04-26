@@ -60,7 +60,7 @@
 </div>
 
 <div class="card shadow-sm">
-	<div class="card-body">
+	<div class="card-body bg-light">
 		<form class="weekly-form" method="post" enctype="multipart/form-data" id="weekly-upload-form">
 			{% csrf_token %}
 			<div class="mb-3">
@@ -98,7 +98,7 @@
 {% if summary.total_rows %}
 <div class="card shadow-sm mt-3">
 	<div class="card-body">
-		<p class="mb-0"><strong>Rows:</strong> {{ summary.total_rows }} | <strong>Agency:</strong> {{ summary.agency_rows }} | <strong>Gazebo:</strong> {{ summary.gazebo_rows }} | <strong>Total (non A-):</strong> {{ summary.total_non_agency }}</p>
+		<p class="mb-0"><strong>Rows:</strong> {{ summary.total_rows }} | <strong>Agency:</strong> {{ summary.agency_rows }} | <strong>Gazebo:</strong> {{ summary.gazebo_rows }} | <strong>Total paid hours:</strong> {{ summary.total_paid_hours }}</p>
 	</div>
 </div>
 {% endif %}
