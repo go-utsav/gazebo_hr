@@ -1,0 +1,27 @@
+{% extends "weekly/base.html" %}
+{% block layout %}
+<main class="main-grid" id="main-content">
+	<div class="center-narrow">
+		<div class="panel">
+			<h1 class="heading-xl">{{ page_heading }}</h1>
+			{% if error %}
+			<div class="error-summary" role="alert">
+				<h2 class="error-summary__title">There is a problem</h2>
+				<p style="margin:0">{{ error }}</p>
+			</div>
+			{% endif %}
+			<form method="post" action="{% url 'weekly:login' %}" novalidate>
+				{% csrf_token %}
+				{% if request.GET.next %}
+				<input type="hidden" name="next" value="{{ request.GET.next }}">
+				{% endif %}
+				{% include "weekly/components/form_field.html" with id="id_username" label="Username" name="username" autocomplete="username" required=1 %}
+				{% include "weekly/components/form_field.html" with id="id_password" label="Password" name="password" type="password" autocomplete="current-password" required=1 %}
+				<div class="button-group">
+					{% include "weekly/components/button_submit.html" with label="Sign in" variant="primary" %}
+				</div>
+			</form>
+		</div>
+	</div>
+</main>
+{% endblock %}

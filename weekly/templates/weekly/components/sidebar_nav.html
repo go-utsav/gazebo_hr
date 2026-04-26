@@ -1,0 +1,14 @@
+<nav class="side-nav" aria-label="Service navigation">
+	<p class="side-nav__title">Reports</p>
+	<ul class="side-nav__list">
+		<li>
+			<a class="side-nav__link{% if request.resolver_match.url_name == 'weekly_report' %} side-nav__link--current{% endif %}" href="{% url 'weekly:weekly_report' %}">Weekly report</a>
+		</li>
+		<li>
+			<a class="side-nav__link{% if request.resolver_match.url_name == 'monthly_report' %} side-nav__link--current{% endif %}" href="{% url 'weekly:monthly_report' %}">Monthly report</a>
+		</li>
+		<li>
+			<a class="side-nav__link{% if request.resolver_match.url_name == 'employee_hour_contracts' %} side-nav__link--current{% endif %}" href="{% url 'weekly:employee_hour_contracts' %}">Employee hour contracts</a>
+		</li>
+	</ul>
+</nav>

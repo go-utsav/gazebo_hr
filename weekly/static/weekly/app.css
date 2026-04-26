@@ -1,0 +1,429 @@
+/* Classic GOV.UK–inspired service theme (layout and colours, not official assets). */
+:root {
+	--govuk-blue: #005ea5;
+	--govuk-blue-dark: #003078;
+	--govuk-green: #00703c;
+	--govuk-green-dark: #002d18;
+	--text: #0b0c0c;
+	--text-secondary: #505a5f;
+	--border: #b1b4b6;
+	--focus: #ffdd00;
+	--page-bg: #dee0e2;
+	--panel-bg: #ffffff;
+	--sidebar-bg: #f3f2f1;
+	--font: "GDS Transport", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	font-size: 100%;
+}
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	font-family: var(--font);
+	font-size: 19px;
+	line-height: 1.3157894737;
+	color: var(--text);
+	background: var(--page-bg);
+}
+
+@media (max-width: 40.0625em) {
+	body {
+		font-size: 16px;
+		line-height: 1.25;
+	}
+}
+
+a:link,
+a:visited {
+	color: var(--govuk-blue);
+}
+
+a:hover {
+	color: var(--govuk-blue-dark);
+}
+
+a:focus {
+	outline: 3px solid transparent;
+	color: var(--text);
+	background-color: var(--focus);
+	box-shadow: 0 -2px var(--focus), 0 4px var(--text);
+	text-decoration: none;
+}
+
+.skip-link {
+	position: absolute;
+	left: -9999px;
+	z-index: 100;
+	padding: 0.5rem 1rem;
+	background: var(--focus);
+	color: var(--text);
+	font-weight: 700;
+}
+
+.skip-link:focus {
+	left: 0;
+	top: 0;
+}
+
+/* Top black bar (classic service header strip) */
+.global-bar {
+	background: var(--text);
+	color: #fff;
+	font-size: 14px;
+	line-height: 1.1428571429;
+}
+
+.global-bar__inner {
+	max-width: 100%;
+	padding: 0.25rem 1rem;
+}
+
+/* Blue header */
+.site-header {
+	background: var(--govuk-blue);
+	color: #fff;
+	border-bottom: 5px solid var(--govuk-blue-dark);
+}
+
+.site-header__inner {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	max-width: 100%;
+	padding: 0.75rem 1rem;
+	flex-wrap: wrap;
+}
+
+.site-header a:link,
+.site-header a:visited {
+	color: #fff;
+	text-decoration: underline;
+	text-underline-offset: 0.1em;
+}
+
+.site-header a:hover {
+	color: #fff;
+}
+
+.site-header a:focus {
+	color: var(--text);
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	text-decoration: none;
+}
+
+.brand:link,
+.brand:visited {
+	color: #fff;
+	text-decoration: none;
+}
+
+.brand:hover .brand__text {
+	text-decoration: underline;
+}
+
+.brand__logo {
+	height: 36px;
+	width: auto;
+	display: block;
+}
+
+.brand__text {
+	font-weight: 700;
+	font-size: 1.5rem;
+	line-height: 1.0416666667;
+}
+
+.site-header__actions {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	font-size: 16px;
+}
+
+.form-inline-logout {
+	margin: 0;
+	display: inline;
+}
+
+.link-button {
+	background: none;
+	border: 0;
+	color: inherit;
+	cursor: pointer;
+	font: inherit;
+	text-decoration: underline;
+	padding: 0;
+}
+
+.link-button:focus {
+	outline: 3px solid var(--focus);
+	color: var(--text);
+	background: var(--focus);
+	box-shadow: 0 2px 0 var(--text);
+}
+
+/* Full-width wrapper */
+.wrapper {
+	width: 100%;
+	max-width: 100%;
+	padding: 0;
+}
+
+/* Main content area (public / login) */
+.main-grid {
+	width: 100%;
+	padding: 1.5rem 1rem 3rem;
+}
+
+@media (min-width: 40.0625em) {
+	.main-grid {
+		padding: 2rem 1.5rem 4rem;
+	}
+}
+
+/* Dashboard: sidebar + content */
+.layout-dashboard {
+	display: flex;
+	width: 100%;
+	min-height: calc(100vh - 120px);
+	align-items: stretch;
+}
+
+.layout-dashboard__sidebar {
+	flex: 0 0 260px;
+	max-width: 100%;
+	background: var(--sidebar-bg);
+	border-right: 1px solid var(--border);
+	padding: 1rem 0;
+}
+
+.layout-dashboard__main {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 1.5rem 1rem 3rem;
+}
+
+@media (max-width: 40.0625em) {
+	.layout-dashboard {
+		flex-direction: column;
+	}
+
+	.layout-dashboard__sidebar {
+		flex-basis: auto;
+		border-right: 0;
+		border-bottom: 1px solid var(--border);
+	}
+}
+
+.side-nav__title {
+	font-size: 14px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--text-secondary);
+	padding: 0 1rem 0.5rem;
+	margin: 0;
+}
+
+.side-nav__list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.side-nav__link {
+	display: block;
+	padding: 0.75rem 1rem;
+	color: var(--text);
+	text-decoration: none;
+	border-left: 4px solid transparent;
+	font-weight: 400;
+}
+
+.side-nav__link:hover {
+	background: rgba(0, 94, 165, 0.06);
+	text-decoration: underline;
+}
+
+.side-nav__link--current {
+	background: #fff;
+	border-left-color: var(--govuk-blue);
+	font-weight: 700;
+	text-decoration: none;
+}
+
+.side-nav__link:focus {
+	outline: none;
+	color: var(--text);
+	background: var(--focus);
+	box-shadow: inset 0 0 0 4px var(--text);
+}
+
+/* Panels / cards */
+.panel {
+	background: var(--panel-bg);
+	border: 1px solid var(--border);
+	padding: 1.5rem;
+	max-width: 40rem;
+	width: 100%;
+}
+
+.panel--wide {
+	max-width: 100%;
+}
+
+.panel > :first-child {
+	margin-top: 0;
+}
+
+.panel > :last-child {
+	margin-bottom: 0;
+}
+
+/* Typography */
+.heading-xl {
+	font-size: 2rem;
+	line-height: 1.09375;
+	font-weight: 700;
+	margin: 0 0 1rem;
+}
+
+@media (min-width: 40.0625em) {
+	.heading-xl {
+		font-size: 2.5rem;
+		line-height: 1.0416666667;
+	}
+}
+
+.lead {
+	font-size: 1.125rem;
+	color: var(--text-secondary);
+	margin: 0 0 1.5rem;
+	max-width: 36rem;
+}
+
+/* Form controls (reusable) */
+.form-group {
+	margin-bottom: 1.25rem;
+}
+
+.form-label {
+	display: block;
+	font-weight: 700;
+	margin-bottom: 0.25rem;
+}
+
+.form-hint {
+	display: block;
+	margin-bottom: 0.25rem;
+	color: var(--text-secondary);
+	font-size: 16px;
+}
+
+.form-control {
+	width: 100%;
+	max-width: 28rem;
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+	padding: 0.5rem 0.75rem;
+	border: 2px solid var(--text);
+	margin: 0;
+}
+
+.form-control:focus {
+	outline: 3px solid var(--focus);
+	outline-offset: 0;
+	box-shadow: inset 0 0 0 2px;
+}
+
+.error-summary {
+	border: 4px solid #d4351c;
+	padding: 1rem;
+	margin-bottom: 1.5rem;
+	max-width: 40rem;
+}
+
+.error-summary__title {
+	font-size: 1.125rem;
+	font-weight: 700;
+	margin: 0 0 0.5rem;
+}
+
+/* Buttons */
+.btn {
+	font-family: inherit;
+	font-size: 19px;
+	line-height: 1;
+	font-weight: 400;
+	margin: 0 0 1rem;
+	padding: 0.5rem 1rem;
+	border: 2px solid transparent;
+	cursor: pointer;
+	text-decoration: none;
+	display: inline-block;
+	text-align: center;
+}
+
+.btn:focus {
+	outline: 3px solid var(--focus);
+	outline-offset: 0;
+	box-shadow: inset 0 0 0 2px var(--text);
+}
+
+.btn--primary {
+	background: var(--govuk-green);
+	color: #fff;
+	box-shadow: 0 2px 0 var(--govuk-green-dark);
+}
+
+.btn--primary:hover {
+	background: #005a30;
+}
+
+.btn--secondary {
+	background: var(--panel-bg);
+	color: var(--text);
+	border-color: var(--border);
+	box-shadow: 0 2px 0 #929191;
+}
+
+.btn--secondary:hover {
+	background: #e8e8e8;
+}
+
+.button-group {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem 1rem;
+	align-items: center;
+	margin-top: 1rem;
+}
+
+.center-narrow {
+	display: flex;
+	justify-content: center;
+	width: 100%;
+}
+
+.footer-meta {
+	border-top: 1px solid var(--border);
+	background: var(--sidebar-bg);
+	padding: 1rem;
+	font-size: 16px;
+	color: var(--text-secondary);
+}

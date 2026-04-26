@@ -1,0 +1,24 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>{{ title }}</title>
+	<link rel="stylesheet" href="{% static 'weekly/app.css' %}">
+	{% block extra_head %}{% endblock %}
+</head>
+<body>
+	<a class="skip-link" href="#main-content">Skip to main content</a>
+	<div class="global-bar" role="presentation">
+		<div class="global-bar__inner"></div>
+	</div>
+	{% include 'weekly/components/navbar.html' %}
+	<div class="wrapper">
+		{% block layout %}{% endblock %}
+	</div>
+	<footer class="footer-meta">
+		<p class="footer-meta__inner">Gazebo — internal payroll and reporting.</p>
+	</footer>
+</body>
+</html>

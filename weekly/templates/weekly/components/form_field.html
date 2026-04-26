@@ -1,0 +1,14 @@
+<div class="form-group">
+	<label class="form-label" for="{{ id }}">{{ label }}</label>
+	{% if hint %}<span class="form-hint" id="{{ id }}_hint">{{ hint }}</span>{% endif %}
+	<input
+		class="form-control"
+		id="{{ id }}"
+		name="{{ name }}"
+		type="{{ type|default:'text' }}"
+		{% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %}
+		{% if value %}value="{{ value }}"{% endif %}
+		{% if required %}required{% endif %}
+		{% if hint %}aria-describedby="{{ id }}_hint"{% endif %}
+	>
+</div>

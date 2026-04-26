@@ -1,0 +1,11 @@
+{% extends "weekly/base.html" %}
+{% block layout %}
+<div class="layout-dashboard" id="main-content">
+	<aside class="layout-dashboard__sidebar">
+		{% include "weekly/components/sidebar_nav.html" %}
+	</aside>
+	<div class="layout-dashboard__main">
+		{% block dashboard_content %}{% endblock %}
+	</div>
+</div>
+{% endblock %}
