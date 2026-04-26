@@ -17,6 +17,26 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def load_env_file(env_file: Path) -> None:
+    if not env_file.exists():
+        return
+
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        os.environ.setdefault(key, value)
+
+
+load_env_file(BASE_DIR / ".env")
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -125,6 +145,58 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{asctime} [{levelname}] {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+        "app_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "app.log",
+            "formatter": "verbose",
+            "level": "INFO",
+        },
+        "error_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "error.log",
+            "formatter": "verbose",
+            "level": "ERROR",
+        },
+        "request_file": {
+            "class": "logging.FileHandler",
+            "filename": LOG_DIR / "requests.log",
+            "formatter": "verbose",
+            "level": "INFO",
+        },
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console", "app_file", "error_file"],
+            "level": "INFO",
+            "propagate": True,
+        },
+        "django.request": {
+            "handlers": ["console", "request_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "weekly": {
+            "handlers": ["console", "app_file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
 
 LOGIN_URL = 'weekly:login'
 LOGIN_REDIRECT_URL = 'weekly:dashboard'
