@@ -135,10 +135,12 @@ def parse_employee_hours(file_obj: Any) -> list[dict[str, Any]]:
         if not name_text or name_text.upper() == "U EMPLOYEE" or "total for" in name_text.lower():
             continue
 
-        basic_hours = _parse_decimal(row[basic_col] if basic_col < len(row) else "")
+        basic_gross = _parse_decimal(row[basic_col] if basic_col < len(row) else "")
         mon_fri_ot = _parse_decimal(row[mon_fri_col] if mon_fri_col < len(row) else "")
         sat_sun_ot = _parse_decimal(row[sat_sun_col] if sat_sun_col < len(row) else "")
         annual_holiday = _parse_decimal(row[annual_col] if annual_col < len(row) else "")
+        # Gross basic in export includes annual leave; net basic matches legacy path and FORMULAS #2.
+        basic_hours = basic_gross - annual_holiday
         total_paid = basic_hours + mon_fri_ot + sat_sun_ot + annual_holiday
 
         result.append(
@@ -326,6 +328,57 @@ def calculate_payroll(employee_rows: list[dict[str, Any]], contracted_file_obj: 
     )
 
 
+_HOUR_BAND_COLS = ["BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"]
+
+
+def _sum_hour_bands(rows: list[dict[str, Any]]) -> dict[str, float]:
+    return {k: sum(float(r.get(k, 0.0) or 0.0) for r in rows) for k in _HOUR_BAND_COLS}
+
+
+def build_emp_agency_total_df(result: PayrollResult) -> pd.DataFrame:
+    """EMP (non-agency / Gazebo), AGENCY, and TOTAL sums for the five hour bands (section C)."""
+    emp = _sum_hour_bands(result.gazebo_rows)
+    agency = _sum_hour_bands(result.agency_rows)
+    total = _sum_hour_bands(result.rows)
+    return pd.DataFrame(
+        [
+            {"Summary": "EMP", **emp},
+            {"Summary": "AGENCY", **agency},
+            {"Summary": "TOTAL", **total},
+        ]
+    )
+
+
+def build_category_summary_hr_df(analysis_df: pd.DataFrame) -> pd.DataFrame:
+    """Same data as Analysis with HR-friendly column names and a grand total row (section B)."""
+    hr_cols = {
+        "BasicHours": "Basic Hour",
+        "MonFriOvertime": "Mon Fri O",
+        "SatSunOvertime": "Sat Sun O",
+        "AnnualHoliday": "Annual Ho",
+        "TotalPaidHours": "Total Paid Hours",
+    }
+    if analysis_df.empty:
+        return pd.DataFrame(columns=["Category", *list(hr_cols.values())])
+    out = analysis_df.rename(columns=hr_cols)
+    total_row: dict[str, Any] = {"Category": "Grand total"}
+    for src, dst in hr_cols.items():
+        total_row[dst] = float(analysis_df[src].sum())
+    return pd.concat([out, pd.DataFrame([total_row])], ignore_index=True)
+
+
+def build_hours_over_60_df(all_df: pd.DataFrame) -> pd.DataFrame:
+    """Employees with TotalPaidHours strictly greater than 60."""
+    if all_df.empty:
+        return pd.DataFrame(columns=["Name", "Category", "SageNo", "TotalPaidHours", "BasicHours", "Overtime", "ContractedHours"])
+    work = all_df.copy()
+    work["_tp"] = pd.to_numeric(work["TotalPaidHours"], errors="coerce").fillna(0.0)
+    filtered = work[work["_tp"] > 60.0].drop(columns=["_tp"], errors="ignore")
+    cols = ["Name", "Category", "SageNo", "TotalPaidHours", "BasicHours", "Overtime", "ContractedHours"]
+    have = [c for c in cols if c in filtered.columns]
+    return filtered[have] if have else filtered
+
+
 def _build_analysis_dataframe(all_df: pd.DataFrame) -> pd.DataFrame:
     if all_df.empty:
         return pd.DataFrame(columns=["Category", "BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"])
@@ -374,6 +427,9 @@ def build_excel_bytes(result: PayrollResult) -> bytes:
     agency_df = pd.DataFrame(result.agency_rows)
     gazebo_df = pd.DataFrame(result.gazebo_rows)
     analysis_df = _build_analysis_dataframe(all_df)
+    emp_agency_df = build_emp_agency_total_df(result)
+    category_hr_df = build_category_summary_hr_df(analysis_df)
+    over60_df = build_hours_over_60_df(all_df)
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -390,6 +446,10 @@ def build_excel_bytes(result: PayrollResult) -> bytes:
             ws_an = writer.book["Analysis"]
             an_start = int(ws_an.max_row) + 2
             _append_grand_total_row_openpyxl(ws_an, analysis_df, an_start)
+
+        emp_agency_df.to_excel(writer, sheet_name="EMP Agency Total", index=False)
+        category_hr_df.to_excel(writer, sheet_name="Category summary", index=False)
+        over60_df.to_excel(writer, sheet_name="Hours over 60", index=False)
 
     output.seek(0)
     return output.getvalue()
