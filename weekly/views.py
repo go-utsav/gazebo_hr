@@ -7,6 +7,12 @@ from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods
 
+from .monthly_service import (
+	build_monthly_excel_bytes,
+	monthly_summaries_from_json,
+	monthly_summaries_to_json,
+	parse_monthly_inputs,
+)
 from .payroll_service import (
 	AGENCY_CATEGORIES,
 	PayrollResult,
@@ -242,16 +248,145 @@ def weekly_report(request: HttpRequest):
 	)
 
 
-@require_GET
-def monthly_report(request: HttpRequest):
-	return render(
-		request,
-		'weekly/monthly_report.html',
-		{
-			'title': 'Monthly report — Gazebo',
-			'page_heading': 'Monthly report',
+def _parse_non_hourly_names(raw: str) -> set[str]:
+	names: set[str] = set()
+	for line in (raw or '').splitlines():
+		n = line.strip()
+		if n:
+			names.add(n.upper())
+	return names
+
+
+def _monthly_context(session_blob: dict) -> dict:
+	raw = session_blob.get('summaries_json') or []
+	summaries = monthly_summaries_from_json(raw) if raw else []
+	week_cards: list[dict[str, Any]] = []
+	merged_totals: dict[str, dict[str, float]] = {}
+	merged_grouped: dict[str, dict[str, float]] = {}
+	total_paid_hours = 0.0
+	total_employee_rows = 0
+	total_non_agency = 0.0
+	for idx, s in enumerate(summaries, start=1):
+		week_total = sum(float(t.TotalPaidHours) for t in s.employee_totals)
+		week_cards.append({
+			'index': idx,
+			'start_date': s.start_date,
+			'end_date': s.end_date,
+			'employee_count': len(s.employees),
+			'category_count': len(s.employee_totals),
+			'adjustments_count': len(s.adjustments),
+			'non_agency_total': round(float(s.non_agency_total or 0.0), 2),
+			'total_paid_hours': round(week_total, 2),
+		})
+		total_paid_hours += week_total
+		total_non_agency += float(s.non_agency_total or 0.0)
+		total_employee_rows += len(s.employees)
+		for t in s.employee_totals:
+			cur = merged_totals.setdefault(
+				t.Category,
+				{'Category': t.Category, 'BasicHours': 0.0, 'MonFriOvertime': 0.0, 'SatSunOvertime': 0.0, 'AnnualHoliday': 0.0, 'TotalPaidHours': 0.0},
+			)
+			cur['BasicHours'] += float(t.BasicHours)
+			cur['MonFriOvertime'] += float(t.MonFriOvertime)
+			cur['SatSunOvertime'] += float(t.SatSunOvertime)
+			cur['AnnualHoliday'] += float(t.AnnualHoliday)
+			cur['TotalPaidHours'] += float(t.TotalPaidHours)
+		for k, t in (s.grouped_totals or {}).items():
+			cur = merged_grouped.setdefault(
+				k,
+				{'Category': k, 'BasicHours': 0.0, 'MonFriOvertime': 0.0, 'SatSunOvertime': 0.0, 'AnnualHoliday': 0.0, 'TotalPaidHours': 0.0},
+			)
+			cur['BasicHours'] += float(t.BasicHours)
+			cur['MonFriOvertime'] += float(t.MonFriOvertime)
+			cur['SatSunOvertime'] += float(t.SatSunOvertime)
+			cur['AnnualHoliday'] += float(t.AnnualHoliday)
+			cur['TotalPaidHours'] += float(t.TotalPaidHours)
+
+	def _round(d: dict) -> dict:
+		return {k: (round(v, 2) if isinstance(v, float) else v) for k, v in d.items()}
+
+	category_totals = sorted((_round(v) for v in merged_totals.values()), key=lambda r: r['TotalPaidHours'], reverse=True)
+	grouped_totals = sorted((_round(v) for v in merged_grouped.values()), key=lambda r: r['TotalPaidHours'], reverse=True)
+
+	return {
+		'week_cards': week_cards,
+		'week_count': len(summaries),
+		'non_hourly_names': session_blob.get('non_hourly') or [],
+		'category_totals': category_totals,
+		'grouped_totals': grouped_totals,
+		'summary_stats': {
+			'total_paid_hours': round(total_paid_hours, 2),
+			'non_agency_total': round(total_non_agency, 2),
+			'employee_rows': total_employee_rows,
 		},
+	}
+
+
+@require_http_methods(['GET', 'POST'])
+def monthly_report(request: HttpRequest):
+	if request.method == 'POST':
+		files_in_order = [
+			request.FILES.get('week1'),
+			request.FILES.get('week2'),
+			request.FILES.get('week3'),
+			request.FILES.get('week4'),
+			request.FILES.get('week5'),
+		]
+		use5 = bool(request.POST.get('use_week5'))
+		required = 5 if use5 else 4
+		files = [f for f in files_in_order[:required] if f]
+		if len(files) < required:
+			messages.error(request, f'Upload {required} weekly workbook(s) (xls/xlsx), or enable week 5 and upload all five.')
+			return redirect('weekly:monthly_report')
+		try:
+			summaries = parse_monthly_inputs(files)
+			non_hourly = _parse_non_hourly_names(request.POST.get('non_hourly_names', ''))
+			for s in summaries:
+				for e in s.employees:
+					if e.Name.strip().upper() in non_hourly and e.Category.strip().startswith('A-'):
+						messages.error(request, f'Agency employee must be hourly: {e.Name}')
+						return redirect('weekly:monthly_report')
+			request.session['monthly_last'] = {
+				'summaries_json': monthly_summaries_to_json(summaries),
+				'non_hourly': sorted(non_hourly),
+				'week_count': len(summaries),
+			}
+			request.session.modified = True
+			messages.success(request, f'Processed {len(summaries)} weekly file(s). Download Excel when ready.')
+		except Exception as exc:
+			messages.error(request, f'Could not process monthly files: {exc}')
+			return redirect('weekly:monthly_report')
+		return redirect('weekly:monthly_report')
+
+	session_blob = request.session.get('monthly_last', {})
+	ctx = {
+		'title': 'Monthly report — Gazebo',
+		'page_heading': 'Monthly report',
+	}
+	ctx.update(_monthly_context(session_blob))
+	return render(request, 'weekly/monthly_report.html', ctx)
+
+
+@require_GET
+def download_monthly_excel(request: HttpRequest):
+	blob = request.session.get('monthly_last', {})
+	raw = blob.get('summaries_json')
+	if not raw:
+		messages.error(request, 'No monthly data. Upload weekly files first.')
+		return redirect('weekly:monthly_report')
+	try:
+		summaries = monthly_summaries_from_json(raw)
+		non_hourly = set(blob.get('non_hourly') or [])
+		file_bytes = build_monthly_excel_bytes(summaries, non_hourly_names=non_hourly)
+	except Exception as exc:
+		messages.error(request, f'Could not build Excel: {exc}')
+		return redirect('weekly:monthly_report')
+	response = HttpResponse(
+		file_bytes,
+		content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 	)
+	response['Content-Disposition'] = 'attachment; filename="monthly_report_output.xlsx"'
+	return response
 
 
 @require_GET
