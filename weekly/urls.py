@@ -17,6 +17,8 @@ urlpatterns = [
 		name='employee_hour_contracts',
 	),
 	path('dashboard/weekly-report/download/', views.download_weekly_excel, name='weekly_download'),
+	path('dashboard/weekly-report/download.csv', views.download_weekly_csv, name='weekly_download_csv'),
+	path('dashboard/weekly-report/download.pdf', views.download_weekly_pdf, name='weekly_download_pdf'),
 	path('dashboard/monthly-report/download/', views.download_monthly_excel, name='monthly_download'),
 	path('api/health', views.health_api, name='health'),
 ]
