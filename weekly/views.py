@@ -1,17 +1,141 @@
+from typing import Any
+
 from django.contrib.auth import authenticate, login, logout
+from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods
-from django.contrib import messages
 
+from .monthly_service import (
+	build_monthly_excel_bytes,
+	monthly_summaries_from_json,
+	monthly_summaries_to_json,
+	parse_monthly_inputs,
+)
 from .payroll_service import (
 	AGENCY_CATEGORIES,
 	PayrollResult,
+	_HOUR_BAND_COLS,
+	_sum_hour_bands,
 	build_excel_bytes,
 	calculate_payroll,
 	parse_employee_hours,
+	total_paid_hours_from_rows,
 )
+
+
+def _hours_to_float(value: Any) -> float:
+	if value is None:
+		return 0.0
+	if isinstance(value, (int, float)):
+		return float(value)
+	s = str(value).strip().replace(',', '')
+	if not s:
+		return 0.0
+	try:
+		return float(s)
+	except ValueError:
+		return 0.0
+
+
+def _rollup_categories(rows: list[dict[str, Any]], top_n: int = 10) -> tuple[list[str], list[float], list[int]]:
+	from collections import defaultdict
+
+	hours: dict[str, float] = defaultdict(float)
+	counts: dict[str, int] = defaultdict(int)
+	for row in rows:
+		cat = str(row.get('Category') or '').strip() or '(none)'
+		hours[cat] += _hours_to_float(row.get('TotalPaidHours'))
+		counts[cat] += 1
+	ordered = sorted(hours.keys(), key=lambda c: hours[c], reverse=True)
+	if len(ordered) <= top_n:
+		labels = ordered
+		h_vals = [round(hours[c], 2) for c in labels]
+		c_vals = [counts[c] for c in labels]
+		return labels, h_vals, c_vals
+	top = ordered[:top_n]
+	rest = ordered[top_n:]
+	h_other = sum(hours[c] for c in rest)
+	c_other = sum(counts[c] for c in rest)
+	labels = top + ['Other']
+	h_vals = [round(hours[c], 2) for c in top] + [round(h_other, 2)]
+	c_vals = [counts[c] for c in top] + [c_other]
+	return labels, h_vals, c_vals
+
+
+def weekly_analytics_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+	if not rows:
+		return None
+	buckets = [0, 0, 0, 0]
+	over_60: list[dict[str, Any]] = []
+	for row in rows:
+		h = _hours_to_float(row.get('TotalPaidHours'))
+		if h < 40:
+			buckets[0] += 1
+		elif h < 48:
+			buckets[1] += 1
+		elif h < 60:
+			buckets[2] += 1
+		else:
+			buckets[3] += 1
+		if h >= 60.0:
+			over_60.append(
+				{
+					'Name': row.get('Name') or '',
+					'SageNo': row.get('SageNo'),
+					'Category': row.get('Category') or '',
+					'TotalPaidHours': h,
+				}
+			)
+	over_60.sort(key=lambda x: x['TotalPaidHours'], reverse=True)
+
+	gazebo_rows = [r for r in rows if str(r.get('Category', '')).strip().upper() not in AGENCY_CATEGORIES]
+	agency_rows = [r for r in rows if str(r.get('Category', '')).strip().upper() in AGENCY_CATEGORIES]
+	emp_totals = _sum_hour_bands(gazebo_rows)
+	ag_totals = _sum_hour_bands(agency_rows)
+	cat_labels, cat_hours, cat_counts = _rollup_categories(rows)
+	_palette = [
+		'#005ea5',
+		'#85994b',
+		'#f47738',
+		'#528187',
+		'#7d4b8c',
+		'#b10e1e',
+		'#ffbf47',
+		'#5694ca',
+		'#67874e',
+		'#f499be',
+		'#505a5f',
+	]
+	_colors = [_palette[i % len(_palette)] for i in range(len(cat_labels))]
+
+	return {
+		'total_people': len(rows),
+		'over_60_count': len(over_60),
+		'over_60': over_60[:200],
+		'chart': {
+			'labels': ['Under 40 h', '40–48 h', '48–60 h', '60+ h'],
+			'counts': buckets,
+		},
+		'extra_charts': {
+			'category': {
+				'labels': cat_labels,
+				'hours': cat_hours,
+				'counts': cat_counts,
+				'colors': _colors,
+			},
+			'empAgency': {
+				'bandLabels': ['Basic', 'Mon–Fri OT', 'Sat–Sun OT', 'Annual', 'Total paid'],
+				'emp': [round(emp_totals[k], 2) for k in _HOUR_BAND_COLS],
+				'agency': [round(ag_totals[k], 2) for k in _HOUR_BAND_COLS],
+			},
+			'totalPaidSplit': {
+				'emp': round(float(emp_totals['TotalPaidHours']), 2),
+				'agency': round(float(ag_totals['TotalPaidHours']), 2),
+			},
+		},
+	}
 
 
 @require_GET
@@ -80,8 +204,10 @@ def dashboard(request: HttpRequest):
 @require_http_methods(['GET', 'POST'])
 def weekly_report(request: HttpRequest):
 	result_data = request.session.get('weekly_last_result', {})
-	preview_rows = result_data.get('rows', [])[:200]
+	all_rows = result_data.get('rows', [])
+	preview_rows = all_rows[:200]
 	summary = result_data.get('summary', {})
+	weekly_analytics = weekly_analytics_from_rows(all_rows)
 
 	if request.method == 'POST':
 		employee_file = request.FILES.get('employee_file')
@@ -100,7 +226,7 @@ def weekly_report(request: HttpRequest):
 			'rows': payroll_result.rows,
 			'summary': {
 				'total_rows': len(payroll_result.rows),
-				'total_non_agency': payroll_result.total_paid_hours_non_agency,
+				'total_paid_hours': payroll_result.total_paid_hours,
 				'agency_rows': len(payroll_result.agency_rows),
 				'gazebo_rows': len(payroll_result.gazebo_rows),
 			},
@@ -117,20 +243,150 @@ def weekly_report(request: HttpRequest):
 			'page_heading': 'Weekly report',
 			'preview_rows': preview_rows,
 			'summary': summary,
+			'weekly_analytics': weekly_analytics,
 		},
 	)
+
+
+def _parse_non_hourly_names(raw: str) -> set[str]:
+	names: set[str] = set()
+	for line in (raw or '').splitlines():
+		n = line.strip()
+		if n:
+			names.add(n.upper())
+	return names
+
+
+def _monthly_context(session_blob: dict) -> dict:
+	raw = session_blob.get('summaries_json') or []
+	summaries = monthly_summaries_from_json(raw) if raw else []
+	week_cards: list[dict[str, Any]] = []
+	merged_totals: dict[str, dict[str, float]] = {}
+	merged_grouped: dict[str, dict[str, float]] = {}
+	total_paid_hours = 0.0
+	total_employee_rows = 0
+	total_non_agency = 0.0
+	for idx, s in enumerate(summaries, start=1):
+		week_total = sum(float(t.TotalPaidHours) for t in s.employee_totals)
+		week_cards.append({
+			'index': idx,
+			'start_date': s.start_date,
+			'end_date': s.end_date,
+			'employee_count': len(s.employees),
+			'category_count': len(s.employee_totals),
+			'adjustments_count': len(s.adjustments),
+			'non_agency_total': round(float(s.non_agency_total or 0.0), 2),
+			'total_paid_hours': round(week_total, 2),
+		})
+		total_paid_hours += week_total
+		total_non_agency += float(s.non_agency_total or 0.0)
+		total_employee_rows += len(s.employees)
+		for t in s.employee_totals:
+			cur = merged_totals.setdefault(
+				t.Category,
+				{'Category': t.Category, 'BasicHours': 0.0, 'MonFriOvertime': 0.0, 'SatSunOvertime': 0.0, 'AnnualHoliday': 0.0, 'TotalPaidHours': 0.0},
+			)
+			cur['BasicHours'] += float(t.BasicHours)
+			cur['MonFriOvertime'] += float(t.MonFriOvertime)
+			cur['SatSunOvertime'] += float(t.SatSunOvertime)
+			cur['AnnualHoliday'] += float(t.AnnualHoliday)
+			cur['TotalPaidHours'] += float(t.TotalPaidHours)
+		for k, t in (s.grouped_totals or {}).items():
+			cur = merged_grouped.setdefault(
+				k,
+				{'Category': k, 'BasicHours': 0.0, 'MonFriOvertime': 0.0, 'SatSunOvertime': 0.0, 'AnnualHoliday': 0.0, 'TotalPaidHours': 0.0},
+			)
+			cur['BasicHours'] += float(t.BasicHours)
+			cur['MonFriOvertime'] += float(t.MonFriOvertime)
+			cur['SatSunOvertime'] += float(t.SatSunOvertime)
+			cur['AnnualHoliday'] += float(t.AnnualHoliday)
+			cur['TotalPaidHours'] += float(t.TotalPaidHours)
+
+	def _round(d: dict) -> dict:
+		return {k: (round(v, 2) if isinstance(v, float) else v) for k, v in d.items()}
+
+	category_totals = sorted((_round(v) for v in merged_totals.values()), key=lambda r: r['TotalPaidHours'], reverse=True)
+	grouped_totals = sorted((_round(v) for v in merged_grouped.values()), key=lambda r: r['TotalPaidHours'], reverse=True)
+
+	return {
+		'week_cards': week_cards,
+		'week_count': len(summaries),
+		'non_hourly_names': session_blob.get('non_hourly') or [],
+		'category_totals': category_totals,
+		'grouped_totals': grouped_totals,
+		'summary_stats': {
+			'total_paid_hours': round(total_paid_hours, 2),
+			'non_agency_total': round(total_non_agency, 2),
+			'employee_rows': total_employee_rows,
+		},
+	}
+
+
+@require_http_methods(['GET', 'POST'])
+def monthly_report(request: HttpRequest):
+	if request.method == 'POST':
+		files_in_order = [
+			request.FILES.get('week1'),
+			request.FILES.get('week2'),
+			request.FILES.get('week3'),
+			request.FILES.get('week4'),
+			request.FILES.get('week5'),
+		]
+		use5 = bool(request.POST.get('use_week5'))
+		required = 5 if use5 else 4
+		files = [f for f in files_in_order[:required] if f]
+		if len(files) < required:
+			messages.error(request, f'Upload {required} weekly workbook(s) (xls/xlsx), or enable week 5 and upload all five.')
+			return redirect('weekly:monthly_report')
+		try:
+			summaries = parse_monthly_inputs(files)
+			non_hourly = _parse_non_hourly_names(request.POST.get('non_hourly_names', ''))
+			for s in summaries:
+				for e in s.employees:
+					if e.Name.strip().upper() in non_hourly and e.Category.strip().startswith('A-'):
+						messages.error(request, f'Agency employee must be hourly: {e.Name}')
+						return redirect('weekly:monthly_report')
+			request.session['monthly_last'] = {
+				'summaries_json': monthly_summaries_to_json(summaries),
+				'non_hourly': sorted(non_hourly),
+				'week_count': len(summaries),
+			}
+			request.session.modified = True
+			messages.success(request, f'Processed {len(summaries)} weekly file(s). Download Excel when ready.')
+		except Exception as exc:
+			messages.error(request, f'Could not process monthly files: {exc}')
+			return redirect('weekly:monthly_report')
+		return redirect('weekly:monthly_report')
+
+	session_blob = request.session.get('monthly_last', {})
+	ctx = {
+		'title': 'Monthly report — Gazebo',
+		'page_heading': 'Monthly report',
+	}
+	ctx.update(_monthly_context(session_blob))
+	return render(request, 'weekly/monthly_report.html', ctx)
 
 
 @require_GET
-def monthly_report(request: HttpRequest):
-	return render(
-		request,
-		'weekly/monthly_report.html',
-		{
-			'title': 'Monthly report — Gazebo',
-			'page_heading': 'Monthly report',
-		},
+def download_monthly_excel(request: HttpRequest):
+	blob = request.session.get('monthly_last', {})
+	raw = blob.get('summaries_json')
+	if not raw:
+		messages.error(request, 'No monthly data. Upload weekly files first.')
+		return redirect('weekly:monthly_report')
+	try:
+		summaries = monthly_summaries_from_json(raw)
+		non_hourly = set(blob.get('non_hourly') or [])
+		file_bytes = build_monthly_excel_bytes(summaries, non_hourly_names=non_hourly)
+	except Exception as exc:
+		messages.error(request, f'Could not build Excel: {exc}')
+		return redirect('weekly:monthly_report')
+	response = HttpResponse(
+		file_bytes,
+		content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 	)
+	response['Content-Disposition'] = 'attachment; filename="monthly_report_output.xlsx"'
+	return response
 
 
 @require_GET
@@ -160,16 +416,11 @@ def download_weekly_excel(request: HttpRequest):
 
 	agency_rows = [r for r in rows if str(r.get('Category', '')).strip().upper() in AGENCY_CATEGORIES]
 	gazebo_rows = [r for r in rows if str(r.get('Category', '')).strip().upper() not in AGENCY_CATEGORIES]
-	total_non_agency = sum(
-		float(r.get('TotalPaidHours', 0.0))
-		for r in rows
-		if not str(r.get('Category', '')).startswith('A-')
-	)
 	payroll_result = PayrollResult(
 		rows=rows,
 		agency_rows=agency_rows,
 		gazebo_rows=gazebo_rows,
-		total_paid_hours_non_agency=round(total_non_agency, 2),
+		total_paid_hours=total_paid_hours_from_rows(rows),
 	)
 	file_bytes = build_excel_bytes(payroll_result)
 	response = HttpResponse(

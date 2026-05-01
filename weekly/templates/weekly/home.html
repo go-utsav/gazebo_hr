@@ -3,11 +3,13 @@
 <main class="main-grid" id="main-content">
 	<h1 class="heading-xl">{{ page_heading }}</h1>
 	<p class="lead">Use your Gazebo account to open the payroll dashboard, weekly and monthly reports, and employee hour contracts.</p>
-	<div class="panel">
-		<p style="margin-top:0">Status API: <a href="{% url 'weekly:health' %}">/api/health</a> (JSON).</p>
-		<div class="button-group">
-			{% url 'weekly:login' as login_href %}
-			{% include "weekly/components/button_link.html" with href=login_href label="Sign in" variant="primary" %}
+	<div class="card shadow-sm">
+		<div class="card-body">
+			<p class="mb-2">Status API: <a href="{% url 'weekly:health' %}">/api/health</a> (JSON).</p>
+			<div class="d-flex flex-wrap gap-2">
+				{% url 'weekly:login' as login_href %}
+				{% include "weekly/components/button_link.html" with href=login_href label="Sign in" variant="primary" %}
+			</div>
 		</div>
 	</div>
 </main>

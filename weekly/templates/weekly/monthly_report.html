@@ -1,8 +1,262 @@
 {% extends "weekly/dashboard_base.html" %}
 {% block dashboard_content %}
 <h1 class="heading-xl">{{ page_heading }}</h1>
-<p class="lead">Monthly totals and reconciliation will appear here.</p>
-<div class="panel panel--wide">
-	<p style="margin:0">Placeholder content for the monthly report.</p>
+<p class="lead">Upload four (or five) weekly workbooks produced by the weekly report, then download a combined monthly workbook.</p>
+<p class="text-secondary small" style="max-width:40rem">
+	<button type="button" class="btn btn-link p-0 align-baseline" id="btn-monthly-help" data-bs-toggle="modal" data-bs-target="#monthlyHelpModal">How the monthly report works (overview)</button>
+	— <span class="text-body-secondary">Each input is a <strong>weekly</strong> output workbook (xls/xlsx). Click <strong>Help</strong> next to any field.</span>
+</p>
+
+<div class="modal fade" id="monthlyHelpModal" data-bs-backdrop="false" data-bs-keyboard="true" tabindex="-1" aria-labelledby="monthlyHelpModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-scrollable">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h2 class="modal-title h5" id="monthlyHelpModalLabel">How the monthly report works</h2>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close help"></button>
+			</div>
+			<div class="modal-body help-prose" tabindex="-1">
+				<ol class="ps-3 mb-0">
+					<li class="mb-2">You upload <strong>4 or 5</strong> weekly report workbooks (output of the Weekly report page).</li>
+					<li class="mb-2">Each workbook is parsed for its <strong>employees</strong>, <strong>adjustments</strong>, <strong>category totals</strong> and <strong>date range</strong>.</li>
+					<li class="mb-2">Optionally paste <strong>non-hourly</strong> employee names (one per line) — these are subtracted on the Summary sheet. Agency (<code>A-…</code>) names cannot be non-hourly and will be rejected.</li>
+					<li class="mb-2">Click <strong>Process files</strong> to validate and store the data in your session.</li>
+					<li class="mb-0">Click <strong>Download Excel</strong> to get a combined workbook: one sheet per week plus a <strong>Summary</strong> sheet with merged employees, category totals, non-hourly adjustments and grouped/non-agency totals.</li>
+				</ol>
+			</div>
+		</div>
+	</div>
 </div>
+
+<div class="modal fade" id="helpWeeklyFileModal" data-bs-backdrop="false" data-bs-keyboard="true" tabindex="-1" aria-labelledby="helpWeeklyFileModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-scrollable">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h2 class="modal-title h5" id="helpWeeklyFileModalLabel">Weekly workbook (per week)</h2>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close help"></button>
+			</div>
+			<div class="modal-body help-prose small" tabindex="-1">
+				<p class="mb-2"><span class="fw-bold text-body">What it is</span> — the xls/xlsx produced by the <strong>Weekly report</strong> page (<em>Download Excel</em> on that screen). One file per week.</p>
+				<p class="mb-2"><span class="fw-bold text-body">Layout expected</span> — row 1 contains the <strong>Start Date</strong> / <strong>End Date</strong> (D-prefixed); row 3 has the header (<code>Name, Category, SageNo, BasicHours, MonFriOvertime, SatSunOvertime, AnnualHoliday, TotalPaidHours</code>); then employee rows; then an <strong>Adjustments</strong> block; then <strong>Category</strong> totals.</p>
+				<p class="mb-0"><span class="fw-bold text-body">Order matters</span> — upload Week 1 → Week 2 → Week 3 → Week 4 (→ Week 5). Week 5 is optional; tick the box to require it.</p>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="modal fade" id="helpNonHourlyModal" data-bs-backdrop="false" data-bs-keyboard="true" tabindex="-1" aria-labelledby="helpNonHourlyModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-scrollable">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h2 class="modal-title h5" id="helpNonHourlyModalLabel">Non-hourly employees</h2>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close help"></button>
+			</div>
+			<div class="modal-body help-prose small" tabindex="-1">
+				<p class="mb-2"><span class="fw-bold text-body">What it is</span> — salaried / non-hourly staff whose hours should be <strong>subtracted</strong> from the category totals on the Summary sheet.</p>
+				<p class="mb-2"><span class="fw-bold text-body">Format</span> — one <strong>full name</strong> per line (case-insensitive). Empty lines are ignored.</p>
+				<p class="mb-0"><span class="fw-bold text-body">Rule</span> — names in an agency category (starts with <code>A-</code>) cannot be non-hourly; the page will reject these.</p>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="card shadow-sm">
+	<div class="card-body bg-light">
+		<form class="weekly-form" method="post" enctype="multipart/form-data" id="monthly-upload-form">
+			{% csrf_token %}
+			<div class="mb-3">
+				<div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+					<label class="form-label mb-0">Weekly workbooks (.xls / .xlsx)</label>
+					<button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#helpWeeklyFileModal">Help</button>
+				</div>
+				<p class="form-text">One file per week, <strong>in order</strong>. Weeks 1–4 are required; tick <em>Include week 5</em> to require a fifth.</p>
+				<div class="row g-2">
+					{% for n in "12345" %}
+					<div class="col-12 col-md-6 col-xl">
+						<label class="form-label small mb-1" for="id_week{{ n }}">Week {{ n }}{% if n == "5" %} (optional){% endif %}</label>
+						<input id="id_week{{ n }}" class="form-control form-control-sm" type="file" name="week{{ n }}" accept=".xls,.xlsx"{% if n != "5" %} required{% endif %}>
+					</div>
+					{% endfor %}
+				</div>
+				<div class="form-check mt-2">
+					<input class="form-check-input" type="checkbox" id="id_use_week5" name="use_week5" value="1">
+					<label class="form-check-label" for="id_use_week5">Include week 5 (require 5 files instead of 4)</label>
+				</div>
+			</div>
+			<div class="mb-3">
+				<div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+					<label class="form-label mb-0" for="id_non_hourly_names">Non-hourly employee names</label>
+					<button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#helpNonHourlyModal">Help</button>
+				</div>
+				<p class="form-text">Optional. One full name per line. Agency (<code>A-…</code>) names are not allowed.</p>
+				<textarea id="id_non_hourly_names" class="form-control" name="non_hourly_names" rows="3" placeholder="JOHN SMITH&#10;JANE DOE">{% for n in non_hourly_names %}{{ n }}
+{% endfor %}</textarea>
+			</div>
+			<div class="d-flex flex-wrap gap-2 align-items-center">
+				{% include "weekly/components/button_submit.html" with label="Process files" variant="primary" id="btn-process-monthly" %}
+				<a class="btn btn-outline-secondary{% if not week_count %} disabled{% endif %}" href="{% url 'weekly:monthly_download' %}"{% if not week_count %} aria-disabled="true" tabindex="-1"{% endif %}>Download Excel</a>
+				{% if week_count %}
+				<span class="small text-secondary">{{ week_count }} week file(s) loaded</span>
+				{% endif %}
+			</div>
+		</form>
+	</div>
+</div>
+
+{% if messages %}
+<div class="mt-3">
+	{% for message in messages %}
+		<div class="alert alert-{% if 'error' in message.tags %}danger{% elif 'success' in message.tags %}success{% else %}info{% endif %}" role="alert">{{ message }}</div>
+	{% endfor %}
+</div>
+{% endif %}
+
+{% if week_count %}
+<div class="card shadow-sm mt-3">
+	<div class="card-body">
+		<p class="mb-2"><strong>Weeks loaded:</strong> {{ week_count }} | <strong>Employee rows (all weeks):</strong> {{ summary_stats.employee_rows }} | <strong>Total paid hours:</strong> {{ summary_stats.total_paid_hours }} | <strong>Non-agency total:</strong> {{ summary_stats.non_agency_total }}</p>
+		<div class="table-responsive">
+			<table class="table table-sm table-striped mb-0">
+				<thead>
+					<tr>
+						<th scope="col">Week</th>
+						<th scope="col">Start</th>
+						<th scope="col">End</th>
+						<th scope="col" class="text-end">Employees</th>
+						<th scope="col" class="text-end">Categories</th>
+						<th scope="col" class="text-end">Adjustments</th>
+						<th scope="col" class="text-end">Non-agency total</th>
+						<th scope="col" class="text-end">Total paid h</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for w in week_cards %}
+					<tr>
+						<th scope="row">Week {{ w.index }}</th>
+						<td>{{ w.start_date }}</td>
+						<td>{{ w.end_date }}</td>
+						<td class="text-end">{{ w.employee_count }}</td>
+						<td class="text-end">{{ w.category_count }}</td>
+						<td class="text-end">{{ w.adjustments_count }}</td>
+						<td class="text-end">{{ w.non_agency_total }}</td>
+						<td class="text-end fw-semibold">{{ w.total_paid_hours }}</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</div>
+</div>
+
+<div class="row g-3 mt-1">
+	<div class="col-12 col-xl-7">
+		<div class="card shadow-sm h-100" id="monthly-category-card">
+			<div class="card-body">
+				<h2 class="h5 mb-2">Category totals (all weeks combined)</h2>
+				<div class="mb-2 d-flex flex-wrap gap-2 align-items-center">
+					<label class="small text-secondary mb-0" for="monthly-cat-search">Search</label>
+					<input id="monthly-cat-search" type="search" class="form-control form-control-sm" style="max-width:18rem" placeholder="Category…" autocomplete="off">
+				</div>
+				<div class="table-responsive" style="max-height: 24rem; overflow-y: auto;">
+					<table class="table table-sm table-striped table-hover mb-0">
+						<thead class="table-light sticky-top">
+							<tr>
+								<th scope="col">Category</th>
+								<th scope="col" class="text-end">Basic</th>
+								<th scope="col" class="text-end">Mon–Fri OT</th>
+								<th scope="col" class="text-end">Sat/Sun OT</th>
+								<th scope="col" class="text-end">Annual</th>
+								<th scope="col" class="text-end">Total paid</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for t in category_totals %}
+							<tr class="monthly-cat-row">
+								<td>{{ t.Category }}</td>
+								<td class="text-end">{{ t.BasicHours }}</td>
+								<td class="text-end">{{ t.MonFriOvertime }}</td>
+								<td class="text-end">{{ t.SatSunOvertime }}</td>
+								<td class="text-end">{{ t.AnnualHoliday }}</td>
+								<td class="text-end fw-semibold">{{ t.TotalPaidHours }}</td>
+							</tr>
+							{% endfor %}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="col-12 col-xl-5">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">Grouped totals</h2>
+				<p class="small text-secondary mb-2">Aggregated by the first 4 characters of the category (Agency codes keep their sub-group).</p>
+				<div class="table-responsive" style="max-height: 24rem; overflow-y: auto;">
+					<table class="table table-sm table-striped mb-0">
+						<thead class="table-light sticky-top">
+							<tr>
+								<th scope="col">Group</th>
+								<th scope="col" class="text-end">Basic</th>
+								<th scope="col" class="text-end">OT (wk)</th>
+								<th scope="col" class="text-end">OT (we)</th>
+								<th scope="col" class="text-end">Annual</th>
+								<th scope="col" class="text-end">Total</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for g in grouped_totals %}
+							<tr>
+								<td>{{ g.Category }}</td>
+								<td class="text-end">{{ g.BasicHours }}</td>
+								<td class="text-end">{{ g.MonFriOvertime }}</td>
+								<td class="text-end">{{ g.SatSunOvertime }}</td>
+								<td class="text-end">{{ g.AnnualHoliday }}</td>
+								<td class="text-end fw-semibold">{{ g.TotalPaidHours }}</td>
+							</tr>
+							{% endfor %}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block after_bootstrap %}
+<script>
+(function () {
+	var form = document.getElementById('monthly-upload-form');
+	if (form) {
+		var btn = document.getElementById('btn-process-monthly');
+		form.addEventListener('submit', function () {
+			if (!btn || btn.disabled) return;
+			btn.disabled = true;
+			if (!btn.getAttribute('data-orig')) btn.setAttribute('data-orig', btn.textContent);
+			btn.textContent = 'Processing…';
+		});
+	}
+
+	var use5 = document.getElementById('id_use_week5');
+	var week5 = document.getElementById('id_week5');
+	function syncWeek5() {
+		if (!use5 || !week5) return;
+		if (use5.checked) { week5.setAttribute('required', 'required'); }
+		else { week5.removeAttribute('required'); }
+	}
+	if (use5) { use5.addEventListener('change', syncWeek5); syncWeek5(); }
+
+	var input = document.getElementById('monthly-cat-search');
+	var card = document.getElementById('monthly-category-card');
+	if (input && card) {
+		var rows = card.querySelectorAll('tr.monthly-cat-row');
+		input.addEventListener('input', function () {
+			var q = (input.value || '').trim().toLowerCase();
+			rows.forEach(function (tr) {
+				tr.style.display = !q || (tr.textContent || '').toLowerCase().indexOf(q) !== -1 ? '' : 'none';
+			});
+		});
+	}
+})();
+</script>
 {% endblock %}

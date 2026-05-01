@@ -29,7 +29,12 @@ class PayrollResult:
     rows: list[dict[str, Any]]
     agency_rows: list[dict[str, Any]]
     gazebo_rows: list[dict[str, Any]]
-    total_paid_hours_non_agency: float
+    total_paid_hours: float
+
+
+def total_paid_hours_from_rows(rows: list[dict[str, Any]]) -> float:
+    """Sum TotalPaidHours across all employee rows (includes every category, including A- prefix)."""
+    return round(sum(float(r.get("TotalPaidHours", 0.0)) for r in rows), 2)
 
 
 def _normalize_header(text: str) -> str:
@@ -130,10 +135,12 @@ def parse_employee_hours(file_obj: Any) -> list[dict[str, Any]]:
         if not name_text or name_text.upper() == "U EMPLOYEE" or "total for" in name_text.lower():
             continue
 
-        basic_hours = _parse_decimal(row[basic_col] if basic_col < len(row) else "")
+        basic_gross = _parse_decimal(row[basic_col] if basic_col < len(row) else "")
         mon_fri_ot = _parse_decimal(row[mon_fri_col] if mon_fri_col < len(row) else "")
         sat_sun_ot = _parse_decimal(row[sat_sun_col] if sat_sun_col < len(row) else "")
         annual_holiday = _parse_decimal(row[annual_col] if annual_col < len(row) else "")
+        # Gross basic in export includes annual leave; net basic matches legacy path and FORMULAS #2.
+        basic_hours = basic_gross - annual_holiday
         total_paid = basic_hours + mon_fri_ot + sat_sun_ot + annual_holiday
 
         result.append(
@@ -157,7 +164,7 @@ def _parse_employee_legacy(rows: list[list[str]]) -> list[dict[str, Any]]:
     expects_category = True
     result: list[dict[str, Any]] = []
     idx = 0
-    while idx < 250 and idx + 6 < len(rows):
+    while idx + 6 < len(rows):
         row = rows[6 + idx]
         col_a = row[0] if row else ""
         if col_a:
@@ -202,6 +209,58 @@ def _find_header_index(headers: list[str], *candidates: str) -> int:
     return -1
 
 
+def _contract_hrs_value_in_row(row: list[str]) -> float | None:
+    for c, cell in enumerate(row):
+        n = _normalize_header(cell)
+        if n in ("contracthrs", "contracthours", "contracthr", "contractedhours"):
+            if c + 1 < len(row):
+                return _parse_decimal(row[c + 1])
+            return 0.0
+    return None
+
+
+def _parse_clockrite_contract_report(rows: list[list[str]]) -> tuple[dict[int, float], dict[str, float]]:
+    """
+    Clockrite "Employee Details - Advanced" XLS: repeated blocks with label rows
+    (e.g. "Contract Hrs" and "Payroll Number" in separate rows, not one header table).
+    Join key: Payroll Number value == employee file Pay ID (SageNo).
+    """
+    by_payroll: dict[int, float] = {}
+    by_name: dict[str, float] = {}
+    for r, row in enumerate(rows):
+        for c, cell in enumerate(row):
+            if _normalize_header(cell) != "payrollnumber":
+                continue
+            if c + 1 >= len(row):
+                continue
+            pay_no = _parse_int(row[c + 1])
+            if pay_no is None or pay_no == 0:
+                continue
+            hours = 0.0
+            for back in range(1, 25):
+                if r - back < 0:
+                    break
+                prev = rows[r - back]
+                got = _contract_hrs_value_in_row(prev)
+                if got is not None:
+                    hours = got
+                    break
+            by_payroll[pay_no] = hours
+            for back in range(1, 30):
+                if r - back < 0:
+                    break
+                pr = rows[r - back]
+                if not pr:
+                    continue
+                a0 = _to_text(pr[0])
+                if a0.isdigit() and len(a0) < 6 and len(pr) > 1:
+                    name_key = _to_text(pr[1]).upper()
+                    if name_key:
+                        by_name[name_key] = hours
+                    break
+    return by_payroll, by_name
+
+
 def parse_contracted_hours(file_obj: Any) -> tuple[dict[int, float], dict[str, float]]:
     df = _load_sheet(file_obj)
     rows = [[_to_text(v) for v in rec] for rec in df.values.tolist()]
@@ -213,31 +272,35 @@ def parse_contracted_hours(file_obj: Any) -> tuple[dict[int, float], dict[str, f
     contract_col = -1
     name_col = -1
     for r, row in enumerate(rows[:80]):
-        payroll_col = _find_header_index(row, "payrollnumber", "payrollno", "payroll")
-        contract_col = _find_header_index(row, "contracthrs", "contracthours", "contracthr", "contractedhours")
-        name_col = _find_header_index(row, "clockname", "name", "employeename")
-        if payroll_col >= 0 and contract_col >= 0:
+        pc = _find_header_index(row, "payrollnumber", "payrollno", "payroll")
+        cc = _find_header_index(row, "contracthrs", "contracthours", "contracthr", "contractedhours")
+        if pc >= 0 and cc >= 0:
             header_row = r
+            payroll_col = pc
+            contract_col = cc
+            name_col = _find_header_index(row, "clockname", "name", "employeename")
             break
 
-    if header_row < 0:
-        return {}, {}
+    if header_row >= 0:
+        by_payroll: dict[int, float] = {}
+        by_name: dict[str, float] = {}
+        for row in rows[header_row + 1 :]:
+            if _row_contains_date_range(row):
+                break
+            hours = _parse_decimal(row[contract_col] if contract_col < len(row) else "")
+            if hours == 0.0:
+                continue
+            pay_no = _parse_int(row[payroll_col] if payroll_col < len(row) else "")
+            if pay_no is not None:
+                by_payroll[pay_no] = hours
+            if name_col >= 0 and name_col < len(row):
+                name = _to_text(row[name_col]).upper()
+                if name:
+                    by_name[name] = hours
+        if by_payroll or by_name:
+            return by_payroll, by_name
 
-    by_payroll: dict[int, float] = {}
-    by_name: dict[str, float] = {}
-    for row in rows[header_row + 1 :]:
-        hours = _parse_decimal(row[contract_col] if contract_col < len(row) else "")
-        if hours == 0.0:
-            continue
-        pay_no = _parse_int(row[payroll_col] if payroll_col < len(row) else "")
-        if pay_no is not None:
-            by_payroll[pay_no] = hours
-        if name_col >= 0 and name_col < len(row):
-            name = _to_text(row[name_col]).upper()
-            if name:
-                by_name[name] = hours
-
-    return by_payroll, by_name
+    return _parse_clockrite_contract_report(rows)
 
 
 def calculate_payroll(employee_rows: list[dict[str, Any]], contracted_file_obj: Any) -> PayrollResult:
@@ -255,29 +318,118 @@ def calculate_payroll(employee_rows: list[dict[str, Any]], contracted_file_obj: 
 
     agency_rows = [r for r in employee_rows if str(r["Category"]).strip().upper() in AGENCY_CATEGORIES]
     gazebo_rows = [r for r in employee_rows if str(r["Category"]).strip().upper() not in AGENCY_CATEGORIES]
-    total_non_agency = sum(float(r["TotalPaidHours"]) for r in employee_rows if not str(r["Category"]).startswith("A-"))
+    all_hours = total_paid_hours_from_rows(employee_rows)
 
     return PayrollResult(
         rows=employee_rows,
         agency_rows=agency_rows,
         gazebo_rows=gazebo_rows,
-        total_paid_hours_non_agency=round(total_non_agency, 2),
+        total_paid_hours=all_hours,
     )
+
+
+_HOUR_BAND_COLS = ["BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"]
+
+
+def _sum_hour_bands(rows: list[dict[str, Any]]) -> dict[str, float]:
+    return {k: sum(float(r.get(k, 0.0) or 0.0) for r in rows) for k in _HOUR_BAND_COLS}
+
+
+def build_emp_agency_total_df(result: PayrollResult) -> pd.DataFrame:
+    """EMP (non-agency / Gazebo), AGENCY, and TOTAL sums for the five hour bands (section C)."""
+    emp = _sum_hour_bands(result.gazebo_rows)
+    agency = _sum_hour_bands(result.agency_rows)
+    total = _sum_hour_bands(result.rows)
+    return pd.DataFrame(
+        [
+            {"Summary": "EMP", **emp},
+            {"Summary": "AGENCY", **agency},
+            {"Summary": "TOTAL", **total},
+        ]
+    )
+
+
+def build_category_summary_hr_df(analysis_df: pd.DataFrame) -> pd.DataFrame:
+    """Same data as Analysis with HR-friendly column names and a grand total row (section B)."""
+    hr_cols = {
+        "BasicHours": "Basic Hour",
+        "MonFriOvertime": "Mon Fri O",
+        "SatSunOvertime": "Sat Sun O",
+        "AnnualHoliday": "Annual Ho",
+        "TotalPaidHours": "Total Paid Hours",
+    }
+    if analysis_df.empty:
+        return pd.DataFrame(columns=["Category", *list(hr_cols.values())])
+    out = analysis_df.rename(columns=hr_cols)
+    total_row: dict[str, Any] = {"Category": "Grand total"}
+    for src, dst in hr_cols.items():
+        total_row[dst] = float(analysis_df[src].sum())
+    return pd.concat([out, pd.DataFrame([total_row])], ignore_index=True)
+
+
+def build_hours_over_60_df(all_df: pd.DataFrame) -> pd.DataFrame:
+    """Employees with TotalPaidHours strictly greater than 60."""
+    if all_df.empty:
+        return pd.DataFrame(columns=["Name", "Category", "SageNo", "TotalPaidHours", "BasicHours", "Overtime", "ContractedHours"])
+    work = all_df.copy()
+    work["_tp"] = pd.to_numeric(work["TotalPaidHours"], errors="coerce").fillna(0.0)
+    filtered = work[work["_tp"] > 60.0].drop(columns=["_tp"], errors="ignore")
+    cols = ["Name", "Category", "SageNo", "TotalPaidHours", "BasicHours", "Overtime", "ContractedHours"]
+    have = [c for c in cols if c in filtered.columns]
+    return filtered[have] if have else filtered
+
+
+def _build_analysis_dataframe(all_df: pd.DataFrame) -> pd.DataFrame:
+    if all_df.empty:
+        return pd.DataFrame(columns=["Category", "BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"])
+    return (
+        all_df.groupby("Category", dropna=False)[["BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"]]
+        .sum()
+        .reset_index()
+    )
+
+
+def _append_grand_total_row_openpyxl(ws, analysis_df: pd.DataFrame, start_row: int) -> int:
+    """Write 'Grand total' and column sums. Returns one past the last row written."""
+    if analysis_df.empty:
+        return start_row
+    num_cols = ["BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"]
+    r = start_row
+    ws.cell(r, 1, "Grand total")
+    for i, col in enumerate(num_cols, start=2):
+        ws.cell(r, i, float(analysis_df[col].sum()))
+    return r + 1
+
+
+def _append_category_breakdown_block(ws, analysis_df: pd.DataFrame, start_row: int) -> int:
+    """Write analysis headers, category rows, blank row, and grand total. Returns one past the last row."""
+    if analysis_df.empty:
+        return start_row
+    headers = list(analysis_df.columns)
+    r = start_row
+    for c, h in enumerate(headers, start=1):
+        ws.cell(r, c, h)
+    r += 1
+    for _, row in analysis_df.iterrows():
+        for c, h in enumerate(headers, start=1):
+            v = row[h]
+            if h == "Category":
+                ws.cell(r, c, "" if pd.isna(v) else str(v))
+            else:
+                ws.cell(r, c, 0.0 if pd.isna(v) else float(v))
+        r += 1
+    r += 1
+    return _append_grand_total_row_openpyxl(ws, analysis_df, r)
 
 
 def build_excel_bytes(result: PayrollResult) -> bytes:
     all_df = pd.DataFrame(result.rows)
     agency_df = pd.DataFrame(result.agency_rows)
     gazebo_df = pd.DataFrame(result.gazebo_rows)
-
-    if all_df.empty:
-        analysis_df = pd.DataFrame(columns=["Category", "BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"])
-    else:
-        analysis_df = (
-            all_df.groupby("Category", dropna=False)[["BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours"]]
-            .sum()
-            .reset_index()
-        )
+    analysis_df = _build_analysis_dataframe(all_df)
+    emp_agency_df = build_emp_agency_total_df(result)
+    category_hr_df = build_category_summary_hr_df(analysis_df)
+    over60_df = build_hours_over_60_df(all_df)
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -285,5 +437,19 @@ def build_excel_bytes(result: PayrollResult) -> bytes:
         agency_df.to_excel(writer, sheet_name="Agency Employee", index=False)
         gazebo_df.to_excel(writer, sheet_name="Gazebo Employee", index=False)
         analysis_df.to_excel(writer, sheet_name="Analysis", index=False)
+
+        if not analysis_df.empty:
+            ws_all = writer.book["All Data"]
+            all_data_start = int(ws_all.max_row) + 2
+            _append_category_breakdown_block(ws_all, analysis_df, all_data_start)
+
+            ws_an = writer.book["Analysis"]
+            an_start = int(ws_an.max_row) + 2
+            _append_grand_total_row_openpyxl(ws_an, analysis_df, an_start)
+
+        emp_agency_df.to_excel(writer, sheet_name="EMP Agency Total", index=False)
+        category_hr_df.to_excel(writer, sheet_name="Category summary", index=False)
+        over60_df.to_excel(writer, sheet_name="Hours over 60", index=False)
+
     output.seek(0)
     return output.getvalue()

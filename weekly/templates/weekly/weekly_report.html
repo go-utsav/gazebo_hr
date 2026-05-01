@@ -1,73 +1,506 @@
 {% extends "weekly/dashboard_base.html" %}
+{% block extra_head %}
+{% if weekly_analytics %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+{% endif %}
+{% endblock %}
 {% block dashboard_content %}
 <h1 class="heading-xl">{{ page_heading }}</h1>
 <p class="lead">Upload employee-hours and contracted-hours files, run calculations, and export the result as Excel.</p>
-<div class="panel panel--wide">
-	<form method="post" enctype="multipart/form-data" style="display:grid;gap:.75rem;max-width:680px">
-		{% csrf_token %}
-		<label>
-			Employee hours file (.xls/.xlsx)
-			<input type="file" name="employee_file" accept=".xls,.xlsx" required>
-		</label>
-		<label>
-			Contracted hours file (.xls/.xlsx)
-			<input type="file" name="contracted_file" accept=".xls,.xlsx" required>
-		</label>
-		<div class="button-group">
-			{% include "weekly/components/button_submit.html" with label="Process files" variant="primary" %}
-			<a class="btn btn--secondary" href="{% url 'weekly:weekly_download' %}">Download Excel</a>
+<p class="text-secondary small" style="max-width:36rem">
+	<button type="button" class="btn btn-link p-0 align-baseline" id="btn-weekly-help" data-bs-toggle="modal" data-bs-target="#weeklyHelpModal">How the report works (overview)</button> — <span class="text-body-secondary">For each file, use the <strong>Help</strong> button next to the field.</span>
+</p>
+
+<div class="modal fade" id="weeklyHelpModal" data-bs-backdrop="false" data-bs-keyboard="true" tabindex="-1" aria-labelledby="weeklyHelpModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-scrollable">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h2 class="modal-title h5" id="weeklyHelpModalLabel">How the weekly report works</h2>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close help"></button>
+			</div>
+			<div class="modal-body help-prose" id="weekly-help-prose" tabindex="-1">
+				<ol class="ps-3 mb-0">
+					<li class="mb-2">You upload <strong>two</strong> spreadsheets: the <strong>employee hours</strong> file (from payroll / time) and the <strong>contract hours</strong> file (from HR / Clockrite, or a simple table if you use that format).</li>
+					<li class="mb-2">The app reads the employee file and builds one row per person, using <strong>Pay ID</strong> (same as <strong>Sage number</strong> / SageNo in the report).</li>
+					<li class="mb-2">It reads the contract file and finds each person&rsquo;s <strong>Payroll number</strong> and <strong>Contract hours</strong> (or columns in a single header row if you use a flat table export).</li>
+					<li class="mb-2">It <strong>joins</strong> the two: <code>Pay ID = Payroll number</code>. If no payroll number is found, it may fall back to matching on <strong>name</strong> (check <strong>Contract match</strong> in the output).</li>
+					<li class="mb-2">It calculates <strong>Overtime</strong> = total paid hours minus contracted hours, and splits employees into <strong>agency</strong> vs <strong>Gazebo</strong> categories for analysis.</li>
+					<li class="mb-0">You can <strong>Download Excel</strong> for a full workbook (all data, not only the on-screen preview).</li>
+				</ol>
+			</div>
 		</div>
-	</form>
+	</div>
+</div>
+
+<div class="modal fade" id="helpEmployeeModal" data-bs-backdrop="false" data-bs-keyboard="true" tabindex="-1" aria-labelledby="helpEmployeeModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-scrollable">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h2 class="modal-title h5" id="helpEmployeeModalLabel">Employee hours file</h2>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close help"></button>
+			</div>
+			<div class="modal-body help-prose small" tabindex="-1">
+				<p class="mb-2"><span class="fw-bold text-body">What it is</span> — your payroll or time system export of hours for the week (e.g. paysummary / gross / clock export).</p>
+				<p class="mb-2"><span class="fw-bold text-body">Where to get it</span> — export from the system you already use (e.g. payroll software or time &amp; attendance) as <strong>.xls</strong> or <strong>.xlsx</strong>. The export must include a <strong>Pay ID</strong> column so each row can be matched; that ID is the same as the <strong>Payroll / Sage</strong> number in HR.</p>
+				<p class="mb-0"><span class="fw-bold text-body">What we need in the file</span> — at minimum: employee name, Pay ID, and the hour bands the report uses (basic, overtime, holiday, etc., depending on your file layout). If the layout changes, check that the <strong>Pay ID</strong> column is still present.</p>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="modal fade" id="helpContractModal" data-bs-backdrop="false" data-bs-keyboard="true" tabindex="-1" aria-labelledby="helpContractModalLabel" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-scrollable">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h2 class="modal-title h5" id="helpContractModalLabel">Contract hours file</h2>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close help"></button>
+			</div>
+			<div class="modal-body help-prose small" tabindex="-1">
+				<p class="mb-2"><span class="fw-bold text-body">What it is</span> — the agreed <strong>contracted hours</strong> per person for comparison with paid hours.</p>
+				<p class="mb-2"><span class="fw-bold text-body">Where to get it</span> — from <strong>Clockrite</strong> (or the system that holds your contracts). Typical path: run an <strong>Employee details</strong> (or &ldquo;Advanced&rdquo;) type report and export to Excel, so each person shows a <strong>Payroll number</strong> and <strong>Contract hours</strong> (sometimes on separate label rows in the same block &mdash; the app supports that format).</p>
+				<p class="mb-0"><span class="fw-bold text-body">What we need</span> — each person&rsquo;s <strong>Payroll number</strong> must match the <strong>Pay ID</strong> in the employee hours file. <strong>Contract hours</strong> of <strong>0</strong> is valid and still joins correctly for overtime maths.</p>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="card shadow-sm">
+	<div class="card-body bg-light">
+		<form class="weekly-form" method="post" enctype="multipart/form-data" id="weekly-upload-form">
+			{% csrf_token %}
+			<div class="mb-3">
+				<div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+					<label class="form-label mb-0" for="id_employee_file">Employee hours file (.xls / .xlsx)</label>
+					<button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#helpEmployeeModal">Help</button>
+				</div>
+				<p class="form-text" id="hint-employee">Upload a payroll or time export; it must include <strong>Pay ID</strong>. Open <strong>Help</strong> above for a full walkthrough.</p>
+				<input id="id_employee_file" class="form-control" type="file" name="employee_file" accept=".xls,.xlsx" required aria-describedby="hint-employee">
+			</div>
+			<div class="mb-3">
+				<div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+					<label class="form-label mb-0" for="id_contracted_file">Contract hours file (.xls / .xlsx)</label>
+					<button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#helpContractModal">Help</button>
+				</div>
+				<p class="form-text" id="hint-contract">Upload your Clockrite or HR contract-hours export. <strong>Payroll number</strong> must match the Pay ID in the employee file.</p>
+				<input id="id_contracted_file" class="form-control" type="file" name="contracted_file" accept=".xls,.xlsx" required aria-describedby="hint-contract">
+			</div>
+			<div class="d-flex flex-wrap gap-2 align-items-center">
+				{% include "weekly/components/button_submit.html" with label="Process files" variant="primary" id="btn-process-files" %}
+				<a class="btn btn-outline-secondary" href="{% url 'weekly:weekly_download' %}">Download Excel</a>
+			</div>
+		</form>
+	</div>
 </div>
 
 {% if messages %}
-<div class="panel panel--wide" style="margin-top:1rem">
+<div class="mt-3">
 	{% for message in messages %}
-		<p style="margin:.25rem 0">{{ message }}</p>
+		<div class="alert alert-{% if message.tags == 'error' or 'error' in message.tags %}danger{% elif 'success' in message.tags %}success{% else %}info{% endif %}" role="alert">{{ message }}</div>
 	{% endfor %}
 </div>
 {% endif %}
 
 {% if summary.total_rows %}
-<div class="panel panel--wide" style="margin-top:1rem">
-	<p style="margin:0"><strong>Rows:</strong> {{ summary.total_rows }} | <strong>Agency:</strong> {{ summary.agency_rows }} | <strong>Gazebo:</strong> {{ summary.gazebo_rows }} | <strong>Total (non A-):</strong> {{ summary.total_non_agency }}</p>
+<div class="card shadow-sm mt-3">
+	<div class="card-body">
+		<p class="mb-0"><strong>Rows:</strong> {{ summary.total_rows }} | <strong>Agency:</strong> {{ summary.agency_rows }} | <strong>Gazebo:</strong> {{ summary.gazebo_rows }} | <strong>Total paid hours:</strong> {{ summary.total_paid_hours }}</p>
+	</div>
+</div>
+{% endif %}
+
+{% if weekly_analytics %}
+{{ weekly_analytics.chart|json_script:"weekly-analytics-chart-data" }}
+{{ weekly_analytics.extra_charts|json_script:"weekly-analytics-extra-data" }}
+<div class="row g-3 mt-3">
+	<div class="col-lg-5">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">Hours distribution</h2>
+				<p class="small text-secondary mb-3">Headcount by total paid hours band (all {{ weekly_analytics.total_people }} rows).</p>
+				<div class="weekly-analytics-chart-wrap">
+					<canvas id="weekly-hours-chart" aria-label="Bar chart of employee counts by hours band"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="col-lg-7">
+		<div class="card shadow-sm h-100 border-start border-warning border-3">
+			<div class="card-body">
+				<h2 class="h5 mb-2">60+ hours</h2>
+				<p class="small text-secondary mb-3">
+					<strong>{{ weekly_analytics.over_60_count }}</strong> people at <strong>60 hours or more</strong> total paid (showing up to 200 below).
+				</p>
+				{% if weekly_analytics.over_60 %}
+				<div class="table-responsive" style="max-height: 22rem; overflow-y: auto;">
+					<table class="table table-sm table-striped table-hover mb-0">
+						<thead class="table-light sticky-top">
+							<tr>
+								<th scope="col">Name</th>
+								<th scope="col">Category</th>
+								<th scope="col">SageNo</th>
+								<th scope="col" class="text-end">Total paid h</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for row in weekly_analytics.over_60 %}
+							<tr>
+								<td>{{ row.Name }}</td>
+								<td>{{ row.Category }}</td>
+								<td>{{ row.SageNo }}</td>
+								<td class="text-end fw-semibold">{{ row.TotalPaidHours|floatformat:2 }}</td>
+							</tr>
+							{% endfor %}
+						</tbody>
+					</table>
+				</div>
+				{% else %}
+				<p class="mb-0 text-secondary">No one at 60+ hours in this run.</p>
+				{% endif %}
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="row g-3 mt-3">
+	<div class="col-lg-4">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">Category summary — paid hours</h2>
+				<p class="small text-secondary mb-3">Share of <strong>total paid hours</strong> by payroll category (same idea as the Excel &ldquo;Category summary&rdquo; sheet). Top {{ weekly_analytics.extra_charts.category.labels|length }} slice(s); smaller categories roll into <strong>Other</strong>.</p>
+				<div class="weekly-analytics-chart-wrap">
+					<canvas id="weekly-category-doughnut" aria-label="Doughnut chart of paid hours by category"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="col-lg-4">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">People per category</h2>
+				<p class="small text-secondary mb-3">Headcount by category — polar view so you see both the big groups and the long tail.</p>
+				<div class="weekly-analytics-chart-wrap">
+					<canvas id="weekly-category-polar" aria-label="Polar chart of headcount by category"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="col-lg-4">
+		<div class="card shadow-sm h-100">
+			<div class="card-body">
+				<h2 class="h5 mb-2">Gazebo vs agency — total paid</h2>
+				<p class="small text-secondary mb-3">One stacked bar: <strong>Gazebo (EMP)</strong> vs <strong>Agency</strong> total paid hours this run.</p>
+				<div class="weekly-analytics-chart-wrap weekly-analytics-chart-wrap--thin">
+					<canvas id="weekly-total-split-bar" aria-label="Stacked bar of Gazebo versus agency total hours"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="row g-3 mt-3">
+	<div class="col-12">
+		<div class="card shadow-sm">
+			<div class="card-body">
+				<h2 class="h5 mb-2">EMP vs Agency — hour bands</h2>
+				<p class="small text-secondary mb-3">Side-by-side bars matching the Excel <strong>EMP Agency Total</strong> sheet: Gazebo (EMP) and Agency across basic, overtime bands, annual, and total.</p>
+				<div class="weekly-analytics-chart-wrap weekly-analytics-chart-wrap--tall">
+					<canvas id="weekly-emp-agency-grouped" aria-label="Grouped bar chart EMP versus Agency by hour band"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
 </div>
 {% endif %}
 
 {% if preview_rows %}
-<div class="panel panel--wide" style="margin-top:1rem;overflow:auto">
-	<table style="width:100%;border-collapse:collapse">
-		<thead>
-			<tr>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">Name</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">Category</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">SageNo</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">BasicHours</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">MonFriOvertime</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">SatSunOvertime</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">AnnualHoliday</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">TotalPaidHours</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">ContractedHours</th>
-				<th style="text-align:left;border-bottom:1px solid #ddd;padding:.35rem">Overtime</th>
-			</tr>
-		</thead>
-		<tbody>
-			{% for row in preview_rows %}
-			<tr>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.Name }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.Category }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.SageNo }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.BasicHours }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.MonFriOvertime }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.SatSunOvertime }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.AnnualHoliday }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.TotalPaidHours }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.ContractedHours }}</td>
-				<td style="border-bottom:1px solid #f0f0f0;padding:.35rem">{{ row.Overtime }}</td>
-			</tr>
-			{% endfor %}
-		</tbody>
-	</table>
+<div class="card shadow-sm mt-3" id="weekly-report-preview">
+	<div class="card-body">
+		<div class="weekly-preview-toolbar" id="weekly-preview-toolbar">
+			<label class="d-flex flex-column gap-1 weekly-preview-toolbar__field small">
+				Category
+				<select id="weekly-preview-category" class="form-select form-select-sm" style="min-width:12rem" aria-label="Filter by category">
+					<option value="">All categories</option>
+				</select>
+			</label>
+			<label class="d-flex flex-column gap-1 flex-grow-1 weekly-preview-toolbar__field weekly-preview-toolbar__field--grow small">
+				Search
+				<input type="search" id="weekly-preview-search" class="form-control form-control-sm" placeholder="Name, SageNo, hours…" autocomplete="off" aria-label="Filter rows by text">
+			</label>
+			<div class="d-flex flex-wrap gap-2">
+				<button type="button" class="btn btn-success btn-sm" id="weekly-preview-search-btn">Search</button>
+				<button type="button" class="btn btn-outline-secondary btn-sm" id="weekly-preview-clear-btn">Clear</button>
+			</div>
+		</div>
+		<div class="table-responsive">
+			<table class="table table-sm table-striped table-hover" style="width:100%;">
+				<thead>
+					<tr>
+						<th scope="col">Name</th>
+						<th scope="col">Category</th>
+						<th scope="col">SageNo</th>
+						<th scope="col">BasicHours</th>
+						<th scope="col">MonFriOvertime</th>
+						<th scope="col">SatSunOvertime</th>
+						<th scope="col">AnnualHoliday</th>
+						<th scope="col">TotalPaidHours</th>
+						<th scope="col">ContractedHours</th>
+						<th scope="col">Overtime</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for row in preview_rows %}
+					<tr class="weekly-preview__row" data-category="{{ row.Category }}">
+						<td>{{ row.Name }}</td>
+						<td>{{ row.Category }}</td>
+						<td>{{ row.SageNo }}</td>
+						<td>{{ row.BasicHours }}</td>
+						<td>{{ row.MonFriOvertime }}</td>
+						<td>{{ row.SatSunOvertime }}</td>
+						<td>{{ row.AnnualHoliday }}</td>
+						<td>{{ row.TotalPaidHours }}</td>
+						<td>{{ row.ContractedHours }}</td>
+						<td>{{ row.Overtime }}</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	</div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block after_bootstrap %}
+<script>
+(function () {
+	var weeklyHelpEl = document.getElementById('weeklyHelpModal');
+	if (weeklyHelpEl && window.bootstrap) {
+		function openModalFromHash() {
+			if (location.hash === '#weekly-help') {
+				bootstrap.Modal.getOrCreateInstance(weeklyHelpEl).show();
+			}
+		}
+		if (location.hash) openModalFromHash();
+		window.addEventListener('hashchange', openModalFromHash);
+	}
+
+	var form = document.getElementById('weekly-upload-form');
+	if (form) {
+		var btnProcess = document.getElementById('btn-process-files');
+		form.addEventListener('submit', function () {
+			if (!btnProcess || btnProcess.disabled) return;
+			btnProcess.disabled = true;
+			if (!btnProcess.getAttribute('data-orig')) btnProcess.setAttribute('data-orig', btnProcess.textContent);
+			btnProcess.textContent = 'Processing…';
+		});
+	}
+})();
+(function () {
+	var root = document.getElementById('weekly-report-preview');
+	if (!root) return;
+	var tbody = root.querySelector('tbody');
+	var select = document.getElementById('weekly-preview-category');
+	var input = document.getElementById('weekly-preview-search');
+	var btnSearch = document.getElementById('weekly-preview-search-btn');
+	var btnClear = document.getElementById('weekly-preview-clear-btn');
+	if (!tbody || !select || !input || !btnSearch || !btnClear) return;
+
+	var rows = tbody.querySelectorAll('tr.weekly-preview__row');
+	var cats = new Set();
+	rows.forEach(function (tr) {
+		var c = tr.getAttribute('data-category') || '';
+		if (c) cats.add(c);
+	});
+	Array.from(cats).sort(function (a, b) { return a.localeCompare(b); }).forEach(function (c) {
+		var opt = document.createElement('option');
+		opt.value = c;
+		opt.textContent = c;
+		select.appendChild(opt);
+	});
+
+	function applyFilter() {
+		var q = (input.value || '').trim().toLowerCase();
+		var cat = select.value;
+		rows.forEach(function (tr) {
+			var okCat = !cat || (tr.getAttribute('data-category') || '') === cat;
+			var okQ = !q || (tr.textContent || '').toLowerCase().indexOf(q) !== -1;
+			tr.style.display = okCat && okQ ? '' : 'none';
+		});
+	}
+
+	function clearFilter() {
+		select.selectedIndex = 0;
+		input.value = '';
+		rows.forEach(function (tr) { tr.style.display = ''; });
+	}
+
+	btnSearch.addEventListener('click', applyFilter);
+	btnClear.addEventListener('click', clearFilter);
+	input.addEventListener('keydown', function (e) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			applyFilter();
+		}
+	});
+})();
+(function () {
+	var dataEl = document.getElementById('weekly-analytics-chart-data');
+	var canvas = document.getElementById('weekly-hours-chart');
+	if (!dataEl || !canvas || typeof Chart === 'undefined') return;
+	var payload;
+	try {
+		payload = JSON.parse(dataEl.textContent);
+	} catch (e) {
+		return;
+	}
+	var labels = payload.labels || [];
+	var counts = payload.counts || [];
+	new Chart(canvas.getContext('2d'), {
+		type: 'bar',
+		data: {
+			labels: labels,
+			datasets: [{
+				label: 'People',
+				data: counts,
+				backgroundColor: ['#5694ca', '#85994b', '#f47738', '#b10e1e'],
+				borderWidth: 0
+			}]
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: {
+				legend: { display: false }
+			},
+			scales: {
+				y: {
+					beginAtZero: true,
+					ticks: { precision: 0 }
+				}
+			}
+		}
+	});
+})();
+(function () {
+	var dataEl = document.getElementById('weekly-analytics-extra-data');
+	if (!dataEl || typeof Chart === 'undefined') return;
+	var extra;
+	try {
+		extra = JSON.parse(dataEl.textContent);
+	} catch (e) {
+		return;
+	}
+	var cat = extra.category;
+	var ea = extra.empAgency;
+	var split = extra.totalPaidSplit;
+	if (!cat || !ea || !split) return;
+
+	var doughnutEl = document.getElementById('weekly-category-doughnut');
+	if (doughnutEl && cat.labels && cat.labels.length) {
+		new Chart(doughnutEl.getContext('2d'), {
+			type: 'doughnut',
+			data: {
+				labels: cat.labels,
+				datasets: [{
+					data: cat.hours,
+					backgroundColor: cat.colors,
+					borderWidth: 1,
+					borderColor: '#fff'
+				}]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: {
+					legend: { position: 'bottom' },
+					tooltip: {
+						callbacks: {
+							afterLabel: function (ctx) {
+								var n = cat.counts && cat.counts[ctx.dataIndex];
+								return n != null ? n + ' people' : '';
+							}
+						}
+					}
+				}
+			}
+		});
+	}
+
+	var polarEl = document.getElementById('weekly-category-polar');
+	if (polarEl && cat.labels && cat.labels.length) {
+		new Chart(polarEl.getContext('2d'), {
+			type: 'polarArea',
+			data: {
+				labels: cat.labels,
+				datasets: [{
+					data: cat.counts,
+					backgroundColor: cat.colors.map(function (c) { return c + 'cc'; }),
+					borderWidth: 1,
+					borderColor: '#fff'
+				}]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: {
+					legend: { position: 'right' }
+				},
+				scales: {
+					r: {
+						beginAtZero: true,
+						ticks: { precision: 0 }
+					}
+				}
+			}
+		});
+	}
+
+	var splitEl = document.getElementById('weekly-total-split-bar');
+	if (splitEl) {
+		new Chart(splitEl.getContext('2d'), {
+			type: 'bar',
+			data: {
+				labels: ['Total paid hours'],
+				datasets: [
+					{ label: 'Gazebo (EMP)', data: [split.emp], backgroundColor: '#005ea5', borderWidth: 0 },
+					{ label: 'Agency', data: [split.agency], backgroundColor: '#f47738', borderWidth: 0 }
+				]
+			},
+			options: {
+				indexAxis: 'y',
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: { legend: { position: 'bottom' } },
+				scales: {
+					x: { stacked: true, beginAtZero: true },
+					y: { stacked: true, display: false }
+				}
+			}
+		});
+	}
+
+	var groupedEl = document.getElementById('weekly-emp-agency-grouped');
+	if (groupedEl && ea.bandLabels && ea.bandLabels.length) {
+		new Chart(groupedEl.getContext('2d'), {
+			type: 'bar',
+			data: {
+				labels: ea.bandLabels,
+				datasets: [
+					{ label: 'Gazebo (EMP)', data: ea.emp, backgroundColor: '#005ea5', borderWidth: 0 },
+					{ label: 'Agency', data: ea.agency, backgroundColor: '#f47738', borderWidth: 0 }
+				]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: { legend: { position: 'top' } },
+				scales: {
+					x: { grid: { display: false } },
+					y: { beginAtZero: true }
+				}
+			}
+		});
+	}
+})();
+</script>
 {% endblock %}

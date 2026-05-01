@@ -5,7 +5,8 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{{ title }}</title>
-	<link rel="stylesheet" href="{% static 'weekly/app.css' %}">
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH">
+	<link rel="stylesheet" href="{% static 'weekly/govuk-theme.css' %}">
 	{% block extra_head %}{% endblock %}
 </head>
 <body>
@@ -20,5 +21,7 @@
 	<footer class="footer-meta">
 		<p class="footer-meta__inner">Gazebo — internal payroll and reporting.</p>
 	</footer>
+	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"></script>
+	{% block after_bootstrap %}{% endblock %}
 </body>
 </html>
