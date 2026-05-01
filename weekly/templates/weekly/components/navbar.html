@@ -3,7 +3,6 @@
 	<div class="site-header__inner">
 		<a class="brand" href="{% url 'weekly:home' %}">
 			<img class="brand__logo" src="{% static 'images/logo.png' %}" alt="" width="120" height="36">
-			<span class="brand__text">Gazebo</span>
 		</a>
 		<div class="site-header__actions">
 			{% if user.is_authenticated %}
