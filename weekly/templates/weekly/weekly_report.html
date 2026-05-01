@@ -90,10 +90,16 @@
 </style>
 {% endblock %}
 {% block dashboard_content %}
-<h1 class="heading-xl">{{ page_heading }}</h1>
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-1">
+	<h1 class="heading-xl mb-0">{{ page_heading }}</h1>
+	<a href="{% url 'weekly:weekly_help' %}" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener">
+		<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:4px"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+		How to use this report
+	</a>
+</div>
 <p class="lead">Upload employee-hours and contracted-hours files, run calculations, and export the result as Excel.</p>
 <p class="text-secondary small" style="max-width:36rem">
-	<button type="button" class="btn btn-link p-0 align-baseline" id="btn-weekly-help" data-bs-toggle="modal" data-bs-target="#weeklyHelpModal">How the report works (overview)</button> — <span class="text-body-secondary">For each file, use the <strong>Help</strong> button next to the field.</span>
+	<button type="button" class="btn btn-link p-0 align-baseline" id="btn-weekly-help" data-bs-toggle="modal" data-bs-target="#weeklyHelpModal">How the report works (overview)</button> — <span class="text-body-secondary">For the full step-by-step procedure, open <a href="{% url 'weekly:weekly_help' %}" target="_blank" rel="noopener">How to use this report</a>.</span>
 </p>
 
 <div class="modal fade" id="weeklyHelpModal" data-bs-backdrop="false" data-bs-keyboard="true" tabindex="-1" aria-labelledby="weeklyHelpModalLabel" aria-hidden="true">

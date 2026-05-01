@@ -1,0 +1,147 @@
+{% extends "weekly/dashboard_base.html" %}
+{% block extra_head %}
+<style>
+.help-page {
+	max-width: 880px;
+}
+.help-page h1 { color: #003078; }
+.help-page h2 {
+	color: #003078;
+	margin-top: 2rem;
+	padding-bottom: 0.35rem;
+	border-bottom: 2px solid #e6ecf5;
+}
+.help-page h3 { margin-top: 1.25rem; }
+.help-page ol, .help-page ul { padding-left: 1.25rem; }
+.help-page li { margin-bottom: 0.4rem; }
+.help-page .help-callout {
+	background: #f1f4f8;
+	border-left: 4px solid #003078;
+	padding: 0.75rem 1rem;
+	border-radius: 6px;
+	margin: 1rem 0;
+}
+.help-page .table-bordered th { background: #f1f4f8; }
+.help-print-btn { float: right; }
+@media print {
+	.service-nav, .site-header, .help-print-btn, .help-back { display: none !important; }
+	.help-page { max-width: 100%; }
+}
+</style>
+{% endblock %}
+{% block dashboard_content %}
+<div class="help-page">
+	<button type="button" class="btn btn-outline-secondary btn-sm help-print-btn" onclick="window.print()">Print / Save as PDF</button>
+	<a class="help-back small" href="{% url 'weekly:weekly_report' %}">&larr; Back to Weekly report</a>
+
+	<h1 class="heading-xl mt-2">Weekly Report — How to use</h1>
+	<p class="lead">A short procedure for running the weekly payroll report on
+		<a href="https://gazeboo.cloud">gazeboo.cloud</a>.</p>
+
+	<h2>1. Sign in</h2>
+	<ol>
+		<li>Open <a href="{% url 'weekly:login' %}">the sign-in page</a>.</li>
+		<li>Enter your <strong>Username</strong> and <strong>Password</strong>.
+			Forgot it? Click <em>Forgot password?</em> &rarr; contact Utsav for a reset.</li>
+		<li>After signing in you land on the <strong>Dashboard</strong>.</li>
+	</ol>
+
+	<h2>2. Get the two input files from ClockRite</h2>
+	<p>You need <strong>two</strong> Excel files exported from ClockRite. Both are <strong>Excel 7.0 (.xls)</strong>.</p>
+
+	<h3>File A &mdash; Employee hours file</h3>
+	<ol>
+		<li>Open <strong>ClockRite</strong>.</li>
+		<li>Top-left &rarr; <strong>Print Report</strong>.</li>
+		<li>From the dropdown, pick <strong>Paid Hour (Incl. Absence) Summary</strong>.</li>
+		<li><strong>Export</strong> &rarr; <strong>Excel 7.0 format (.xls)</strong>.</li>
+	</ol>
+
+	<h3>File B &mdash; Contract hours file</h3>
+	<ol>
+		<li>Open <strong>ClockRite</strong>.</li>
+		<li>Top-left &rarr; <strong>Print Report</strong>.</li>
+		<li>Pick <strong>Employee Details (Advanced)</strong>.</li>
+		<li><strong>Export</strong> &rarr; <strong>Excel 7.0 format (.xls)</strong>.</li>
+	</ol>
+
+	<div class="help-callout">
+		The same <strong>Pay ID / Payroll number</strong> must appear in both files so the system can match employees.
+	</div>
+
+	<h2>3. Upload and process</h2>
+	<ol>
+		<li>From the dashboard, click <strong>Weekly report</strong>.</li>
+		<li><strong>Employee hours file</strong> &rarr; choose File A.</li>
+		<li><strong>Contract hours file</strong> &rarr; choose File B.</li>
+		<li>Click <strong>Process files</strong>.</li>
+		<li>A <em>&ldquo;Processing your files&hellip;&rdquo;</em> overlay appears. Wait until it disappears (usually a few seconds).</li>
+	</ol>
+	<p>If a file is wrong or missing a column, an error banner appears at the top &mdash; fix the file and try again.</p>
+
+	<h2>4. Review the results</h2>
+	<p>Once processing finishes you&rsquo;ll see, top-down:</p>
+	<ul>
+		<li>A <strong>summary toolbar</strong> with: total rows, agency, Gazebo, total paid hours.</li>
+		<li><strong>View graphs</strong> button &mdash; click to expand charts (hours distribution, 60+ hours, EMP vs Agency, etc.).</li>
+		<li><strong>Export data</strong> button &mdash; drop-down with <strong>Excel / CSV / PDF</strong>.</li>
+		<li>A <strong>scrollable data table</strong> with category filter and search.</li>
+	</ul>
+	<div class="help-callout">
+		The full result is <strong>always</strong> in the export &mdash; the on-screen table only previews the first 200 rows.
+	</div>
+
+	<h2>5. Export</h2>
+	<p>Click <strong>Export data</strong> and pick a format:</p>
+	<div class="table-responsive">
+		<table class="table table-bordered align-top">
+			<thead>
+				<tr><th>Format</th><th>Best for</th><th>Includes</th></tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td><strong>Excel</strong></td>
+					<td>Internal HR use, further calcs</td>
+					<td>Branded &ldquo;Cover&rdquo; sheet + All Data, Agency, Gazebo, Analysis, EMP Agency Total, Category summary, Hours over 60</td>
+				</tr>
+				<tr>
+					<td><strong>CSV</strong></td>
+					<td>Importing to other systems</td>
+					<td>Brand + generated date metadata, then headers + all rows</td>
+				</tr>
+				<tr>
+					<td><strong>PDF</strong></td>
+					<td>Sharing / printing</td>
+					<td>Branded landscape page, summary line, full table, footer with brand + page number</td>
+				</tr>
+			</tbody>
+		</table>
+	</div>
+	<p class="small text-secondary">Filenames are stamped with date + time, e.g. <code>gazebo_weekly_report_20260501-1530.xlsx</code>.</p>
+
+	<h2>6. Run again</h2>
+	<p>To process a new week, simply upload two new files and click <strong>Process files</strong> again &mdash; the previous result is replaced.</p>
+	<p>To sign out, use <strong>Sign out</strong> in the top-right corner.</p>
+
+	<h2>Troubleshooting</h2>
+	<div class="table-responsive">
+		<table class="table table-bordered">
+			<thead>
+				<tr><th>Problem</th><th>What to do</th></tr>
+			</thead>
+			<tbody>
+				<tr><td>&ldquo;No processed data available&rdquo; when clicking Export</td><td>Upload and process the two files first.</td></tr>
+				<tr><td>Wrong people in the result</td><td>Check that <strong>Pay ID</strong> in the employee file matches <strong>Payroll number</strong> in the contract file.</td></tr>
+				<tr><td>Numbers look off for one person</td><td>Check that ClockRite export type is the right one (see step 2). Re-export and try again.</td></tr>
+				<tr><td>Page isn&rsquo;t updating</td><td>Hard-refresh the browser (Cmd-Shift-R / Ctrl-Shift-R).</td></tr>
+				<tr><td>Can&rsquo;t sign in</td><td>Contact Utsav to reset the password.</td></tr>
+			</tbody>
+		</table>
+	</div>
+
+	<p class="mt-4">
+		<a class="btn btn-primary" href="{% url 'weekly:weekly_report' %}">Open Weekly report</a>
+		<button type="button" class="btn btn-outline-secondary" onclick="window.print()">Print / Save as PDF</button>
+	</p>
+</div>
+{% endblock %}

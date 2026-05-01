@@ -207,6 +207,18 @@ def dashboard(request: HttpRequest):
 	)
 
 
+@require_GET
+def weekly_help(request: HttpRequest):
+	return render(
+		request,
+		'weekly/help_weekly.html',
+		{
+			'title': 'Weekly report — How to use',
+			'page_heading': 'Weekly report — How to use',
+		},
+	)
+
+
 @require_http_methods(['GET', 'POST'])
 def weekly_report(request: HttpRequest):
 	result_data = request.session.get('weekly_last_result', {})
