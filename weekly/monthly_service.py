@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+import logging
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation, getcontext
 from io import BytesIO
 from typing import Any
 
 from openpyxl import Workbook
+
+logger = logging.getLogger(__name__)
+
+# 28 significant digits is plenty for payroll arithmetic and matches the .NET
+# `decimal` (128-bit) precision used by the legacy Monthly.exe / Weekly.exe.
+getcontext().prec = 28
+
+_ZERO = Decimal("0")
 
 
 @dataclass
@@ -12,29 +22,38 @@ class MonthlyEmployee:
     Name: str
     Category: str
     SageNo: int
-    BasicHours: float
-    MonFriOvertime: float
-    SatSunOvertime: float
-    AnnualHoliday: float
-    TotalPaidHours: float
+    BasicHours: Decimal
+    MonFriOvertime: Decimal
+    SatSunOvertime: Decimal
+    AnnualHoliday: Decimal
+    TotalPaidHours: Decimal
     IsHourly: bool = True
 
 
 @dataclass
 class MonthlyEmployeeTotal:
     Category: str
-    BasicHours: float
-    MonFriOvertime: float
-    SatSunOvertime: float
-    AnnualHoliday: float
-    TotalPaidHours: float
+    BasicHours: Decimal = _ZERO
+    MonFriOvertime: Decimal = _ZERO
+    SatSunOvertime: Decimal = _ZERO
+    AnnualHoliday: Decimal = _ZERO
+    TotalPaidHours: Decimal = _ZERO
 
 
 @dataclass
 class MonthlyAdjustment:
     Name: str
     Type: str
-    Value: float
+    Value: Decimal
+
+
+@dataclass
+class CategoryConflict:
+    """One employee whose category differed across the weekly files in a month."""
+
+    sage_no: int
+    name: str
+    categories: list[str]
 
 
 @dataclass
@@ -44,7 +63,7 @@ class MonthlyWeekSummary:
     adjustments: list[MonthlyAdjustment] = field(default_factory=list)
     start_date: str = ""
     end_date: str = ""
-    non_agency_total: float = 0.0
+    non_agency_total: Decimal = _ZERO
     grouped_totals: dict[str, MonthlyEmployeeTotal] = field(default_factory=dict)
 
 
@@ -57,27 +76,43 @@ def _to_text(value: Any) -> str:
     return text
 
 
-def _parse_decimal(value: Any) -> float:
+def _parse_decimal(value: Any, *, field_name: str = "", row: int = -1) -> Decimal:
     text = _to_text(value).replace(",", "")
     if not text:
-        return 0.0
+        return _ZERO
     try:
-        return float(text)
-    except ValueError:
-        return 0.0
+        return Decimal(text)
+    except (InvalidOperation, ValueError):
+        logger.warning(
+            "Monthly: could not parse decimal %r (field=%s row=%s); coercing to 0",
+            value,
+            field_name,
+            row,
+        )
+        return _ZERO
 
 
-def _parse_int(value: Any) -> int:
+def _parse_int(value: Any, *, field_name: str = "", row: int = -1) -> int:
     text = _to_text(value).replace(",", "")
     if not text:
         return 0
     try:
-        return int(float(text))
-    except ValueError:
+        return int(Decimal(text))
+    except (InvalidOperation, ValueError):
+        logger.warning(
+            "Monthly: could not parse int %r (field=%s row=%s); coercing to 0",
+            value,
+            field_name,
+            row,
+        )
         return 0
 
 
 def _grouped_key(category: str) -> str:
+    """Replicates .NET grouped-key:
+    - "A-XX YYYY..."  -> "A-XX YYYY"  (4 + space + next 4)
+    - everything else -> first 4 chars (defensively shorter when category < 4 chars)
+    """
     category = _to_text(category)
     if category.startswith("A-") and len(category) >= 9:
         return f"{category[:4]} {category[5:9]}"
@@ -94,24 +129,41 @@ def parse_monthly_week_file(file_obj: Any) -> MonthlyWeekSummary:
         return MonthlyWeekSummary()
 
     out = MonthlyWeekSummary()
-    out.start_date = _to_text(text_rows[0][4] if len(text_rows[0]) > 4 else "").removeprefix("D ").strip()
-    out.end_date = _to_text(text_rows[0][7] if len(text_rows[0]) > 7 else "").removeprefix("D ").strip()
+    out.start_date = (
+        _to_text(text_rows[0][4] if len(text_rows[0]) > 4 else "").removeprefix("D ").strip()
+    )
+    out.end_date = (
+        _to_text(text_rows[0][7] if len(text_rows[0]) > 7 else "").removeprefix("D ").strip()
+    )
 
-    r = 3  # row 4 in excel
+    r = 3  # row 4 in excel (1-indexed)
     while r < len(text_rows):
         row = text_rows[r]
         if not _to_text(row[0] if len(row) > 0 else ""):
             break
+        excel_row = r + 1
         out.employees.append(
             MonthlyEmployee(
                 Name=_to_text(row[0] if len(row) > 0 else ""),
                 Category=_to_text(row[1] if len(row) > 1 else ""),
-                SageNo=_parse_int(row[2] if len(row) > 2 else ""),
-                BasicHours=_parse_decimal(row[3] if len(row) > 3 else ""),
-                MonFriOvertime=_parse_decimal(row[4] if len(row) > 4 else ""),
-                SatSunOvertime=_parse_decimal(row[5] if len(row) > 5 else ""),
-                AnnualHoliday=_parse_decimal(row[6] if len(row) > 6 else ""),
-                TotalPaidHours=_parse_decimal(row[7] if len(row) > 7 else ""),
+                SageNo=_parse_int(
+                    row[2] if len(row) > 2 else "", field_name="SageNo", row=excel_row
+                ),
+                BasicHours=_parse_decimal(
+                    row[3] if len(row) > 3 else "", field_name="BasicHours", row=excel_row
+                ),
+                MonFriOvertime=_parse_decimal(
+                    row[4] if len(row) > 4 else "", field_name="MonFriOvertime", row=excel_row
+                ),
+                SatSunOvertime=_parse_decimal(
+                    row[5] if len(row) > 5 else "", field_name="SatSunOvertime", row=excel_row
+                ),
+                AnnualHoliday=_parse_decimal(
+                    row[6] if len(row) > 6 else "", field_name="AnnualHoliday", row=excel_row
+                ),
+                TotalPaidHours=_parse_decimal(
+                    row[7] if len(row) > 7 else "", field_name="TotalPaidHours", row=excel_row
+                ),
             )
         )
         r += 1
@@ -122,7 +174,7 @@ def parse_monthly_week_file(file_obj: Any) -> MonthlyWeekSummary:
             adjustments_header = i
             break
     if adjustments_header >= 0:
-        ar = adjustments_header + 2
+        ar = adjustments_header + 2  # skip the "Name|Type|Value" sub-header
         while ar < len(text_rows):
             name = _to_text(text_rows[ar][1] if len(text_rows[ar]) > 1 else "")
             if not name:
@@ -131,7 +183,11 @@ def parse_monthly_week_file(file_obj: Any) -> MonthlyWeekSummary:
                 MonthlyAdjustment(
                     Name=name,
                     Type=_to_text(text_rows[ar][2] if len(text_rows[ar]) > 2 else ""),
-                    Value=_parse_decimal(text_rows[ar][3] if len(text_rows[ar]) > 3 else ""),
+                    Value=_parse_decimal(
+                        text_rows[ar][3] if len(text_rows[ar]) > 3 else "",
+                        field_name="AdjustmentValue",
+                        row=ar + 1,
+                    ),
                 )
             )
             ar += 1
@@ -148,23 +204,47 @@ def parse_monthly_week_file(file_obj: Any) -> MonthlyWeekSummary:
             cat = _to_text(text_rows[tr][1] if len(text_rows[tr]) > 1 else "")
             if not cat:
                 break
-            total = MonthlyEmployeeTotal(
-                Category=cat,
-                BasicHours=_parse_decimal(text_rows[tr][3] if len(text_rows[tr]) > 3 else ""),
-                MonFriOvertime=_parse_decimal(text_rows[tr][4] if len(text_rows[tr]) > 4 else ""),
-                SatSunOvertime=_parse_decimal(text_rows[tr][5] if len(text_rows[tr]) > 5 else ""),
-                AnnualHoliday=_parse_decimal(text_rows[tr][6] if len(text_rows[tr]) > 6 else ""),
-                TotalPaidHours=_parse_decimal(text_rows[tr][7] if len(text_rows[tr]) > 7 else ""),
+            out.employee_totals.append(
+                MonthlyEmployeeTotal(
+                    Category=cat,
+                    BasicHours=_parse_decimal(
+                        text_rows[tr][3] if len(text_rows[tr]) > 3 else "",
+                        field_name="TotalsBasicHours",
+                        row=tr + 1,
+                    ),
+                    MonFriOvertime=_parse_decimal(
+                        text_rows[tr][4] if len(text_rows[tr]) > 4 else "",
+                        field_name="TotalsMonFri",
+                        row=tr + 1,
+                    ),
+                    SatSunOvertime=_parse_decimal(
+                        text_rows[tr][5] if len(text_rows[tr]) > 5 else "",
+                        field_name="TotalsSatSun",
+                        row=tr + 1,
+                    ),
+                    AnnualHoliday=_parse_decimal(
+                        text_rows[tr][6] if len(text_rows[tr]) > 6 else "",
+                        field_name="TotalsAnnual",
+                        row=tr + 1,
+                    ),
+                    TotalPaidHours=_parse_decimal(
+                        text_rows[tr][7] if len(text_rows[tr]) > 7 else "",
+                        field_name="TotalsTotalPaid",
+                        row=tr + 1,
+                    ),
+                )
             )
-            out.employee_totals.append(total)
             tr += 1
 
-    out.non_agency_total = sum(t.TotalPaidHours for t in out.employee_totals if not t.Category.startswith("A-"))
+    out.non_agency_total = sum(
+        (t.TotalPaidHours for t in out.employee_totals if not t.Category.startswith("A-")),
+        _ZERO,
+    )
     grouped: dict[str, MonthlyEmployeeTotal] = {}
     for t in out.employee_totals:
         k = _grouped_key(t.Category)
         if k not in grouped:
-            grouped[k] = MonthlyEmployeeTotal(k, 0.0, 0.0, 0.0, 0.0, 0.0)
+            grouped[k] = MonthlyEmployeeTotal(Category=k)
         g = grouped[k]
         g.BasicHours += t.BasicHours
         g.MonFriOvertime += t.MonFriOvertime
@@ -179,25 +259,153 @@ def parse_monthly_inputs(weekly_files: list[Any]) -> list[MonthlyWeekSummary]:
     return [parse_monthly_week_file(f) for f in weekly_files]
 
 
+def detect_category_conflicts(
+    week_summaries: list[MonthlyWeekSummary],
+) -> list[CategoryConflict]:
+    """Replicates the .NET Monthly.exe cross-week MessageBox warning, keyed by SageNo.
+
+    SageNo == 0 is treated as parse-failure and skipped (mirrors .NET, which would
+    have thrown on `int.Parse` and never reached the dict insertion).
+    """
+    by_sage: dict[int, dict[str, Any]] = {}
+    for s in week_summaries:
+        for e in s.employees:
+            if e.SageNo == 0:
+                continue
+            slot = by_sage.setdefault(e.SageNo, {"name": e.Name, "cats": []})
+            cat = (e.Category or "").upper().strip()
+            if cat and cat not in slot["cats"]:
+                slot["cats"].append(cat)
+    conflicts: list[CategoryConflict] = []
+    for sage_no, slot in by_sage.items():
+        if len(slot["cats"]) > 1:
+            conflicts.append(
+                CategoryConflict(sage_no=sage_no, name=slot["name"], categories=list(slot["cats"]))
+            )
+    return conflicts
+
+
+def _dec_str(d: Decimal) -> str:
+    """Plain decimal string (no scientific notation) for JSON-safe session storage."""
+    return format(d, "f")
+
+
+def _dec_from(value: Any) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    if value is None or value == "":
+        return _ZERO
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return _ZERO
+
+
 def monthly_summaries_to_json(summaries: list[MonthlyWeekSummary]) -> list[dict[str, Any]]:
-    return [asdict(s) for s in summaries]
+    out: list[dict[str, Any]] = []
+    for s in summaries:
+        out.append(
+            {
+                "employees": [
+                    {
+                        "Name": e.Name,
+                        "Category": e.Category,
+                        "SageNo": e.SageNo,
+                        "BasicHours": _dec_str(e.BasicHours),
+                        "MonFriOvertime": _dec_str(e.MonFriOvertime),
+                        "SatSunOvertime": _dec_str(e.SatSunOvertime),
+                        "AnnualHoliday": _dec_str(e.AnnualHoliday),
+                        "TotalPaidHours": _dec_str(e.TotalPaidHours),
+                        "IsHourly": e.IsHourly,
+                    }
+                    for e in s.employees
+                ],
+                "employee_totals": [
+                    {
+                        "Category": t.Category,
+                        "BasicHours": _dec_str(t.BasicHours),
+                        "MonFriOvertime": _dec_str(t.MonFriOvertime),
+                        "SatSunOvertime": _dec_str(t.SatSunOvertime),
+                        "AnnualHoliday": _dec_str(t.AnnualHoliday),
+                        "TotalPaidHours": _dec_str(t.TotalPaidHours),
+                    }
+                    for t in s.employee_totals
+                ],
+                "adjustments": [
+                    {"Name": a.Name, "Type": a.Type, "Value": _dec_str(a.Value)}
+                    for a in s.adjustments
+                ],
+                "start_date": s.start_date,
+                "end_date": s.end_date,
+                "non_agency_total": _dec_str(s.non_agency_total),
+                "grouped_totals": {
+                    k: {
+                        "Category": v.Category,
+                        "BasicHours": _dec_str(v.BasicHours),
+                        "MonFriOvertime": _dec_str(v.MonFriOvertime),
+                        "SatSunOvertime": _dec_str(v.SatSunOvertime),
+                        "AnnualHoliday": _dec_str(v.AnnualHoliday),
+                        "TotalPaidHours": _dec_str(v.TotalPaidHours),
+                    }
+                    for k, v in s.grouped_totals.items()
+                },
+            }
+        )
+    return out
 
 
 def monthly_summaries_from_json(data: list[dict[str, Any]]) -> list[MonthlyWeekSummary]:
     out: list[MonthlyWeekSummary] = []
     for d in data:
         s = MonthlyWeekSummary(
-            employees=[MonthlyEmployee(**e) for e in d.get("employees", [])],
-            employee_totals=[MonthlyEmployeeTotal(**t) for t in d.get("employee_totals", [])],
-            adjustments=[MonthlyAdjustment(**a) for a in d.get("adjustments", [])],
+            employees=[
+                MonthlyEmployee(
+                    Name=str(e.get("Name", "")),
+                    Category=str(e.get("Category", "")),
+                    SageNo=int(e.get("SageNo", 0) or 0),
+                    BasicHours=_dec_from(e.get("BasicHours")),
+                    MonFriOvertime=_dec_from(e.get("MonFriOvertime")),
+                    SatSunOvertime=_dec_from(e.get("SatSunOvertime")),
+                    AnnualHoliday=_dec_from(e.get("AnnualHoliday")),
+                    TotalPaidHours=_dec_from(e.get("TotalPaidHours")),
+                    IsHourly=bool(e.get("IsHourly", True)),
+                )
+                for e in d.get("employees", [])
+            ],
+            employee_totals=[
+                MonthlyEmployeeTotal(
+                    Category=str(t.get("Category", "")),
+                    BasicHours=_dec_from(t.get("BasicHours")),
+                    MonFriOvertime=_dec_from(t.get("MonFriOvertime")),
+                    SatSunOvertime=_dec_from(t.get("SatSunOvertime")),
+                    AnnualHoliday=_dec_from(t.get("AnnualHoliday")),
+                    TotalPaidHours=_dec_from(t.get("TotalPaidHours")),
+                )
+                for t in d.get("employee_totals", [])
+            ],
+            adjustments=[
+                MonthlyAdjustment(
+                    Name=str(a.get("Name", "")),
+                    Type=str(a.get("Type", "")),
+                    Value=_dec_from(a.get("Value")),
+                )
+                for a in d.get("adjustments", [])
+            ],
             start_date=str(d.get("start_date", "")),
             end_date=str(d.get("end_date", "")),
-            non_agency_total=float(d.get("non_agency_total", 0.0)),
+            non_agency_total=_dec_from(d.get("non_agency_total")),
         )
         s.grouped_totals = {}
         for k, v in (d.get("grouped_totals") or {}).items():
             if isinstance(v, dict):
-                s.grouped_totals[str(k)] = MonthlyEmployeeTotal(**v)
+                s.grouped_totals[str(k)] = MonthlyEmployeeTotal(
+                    Category=str(v.get("Category", k)),
+                    BasicHours=_dec_from(v.get("BasicHours")),
+                    MonFriOvertime=_dec_from(v.get("MonFriOvertime")),
+                    SatSunOvertime=_dec_from(v.get("SatSunOvertime")),
+                    AnnualHoliday=_dec_from(v.get("AnnualHoliday")),
+                    TotalPaidHours=_dec_from(v.get("TotalPaidHours")),
+                )
         out.append(s)
     return out
 
@@ -267,7 +475,7 @@ def build_monthly_excel_bytes(
         r += 2
         _write_total_header(ws, r)
         r += 1
-        non_agency_bands = [0.0, 0.0, 0.0, 0.0, 0.0]
+        non_agency_bands = [_ZERO, _ZERO, _ZERO, _ZERO, _ZERO]
         for t in s.employee_totals:
             ws.cell(r, 2, t.Category)
             ws.cell(r, 4, t.BasicHours)
@@ -307,7 +515,17 @@ def build_monthly_excel_bytes(
         for e in s.employees:
             cur = merged_employees.get(e.Name)
             if cur is None:
-                merged_employees[e.Name] = MonthlyEmployee(**e.__dict__)
+                merged_employees[e.Name] = MonthlyEmployee(
+                    Name=e.Name,
+                    Category=e.Category,
+                    SageNo=e.SageNo,
+                    BasicHours=e.BasicHours,
+                    MonFriOvertime=e.MonFriOvertime,
+                    SatSunOvertime=e.SatSunOvertime,
+                    AnnualHoliday=e.AnnualHoliday,
+                    TotalPaidHours=e.TotalPaidHours,
+                    IsHourly=e.IsHourly,
+                )
                 continue
             cur.BasicHours += e.BasicHours
             cur.MonFriOvertime += e.MonFriOvertime
@@ -320,7 +538,14 @@ def build_monthly_excel_bytes(
         for t in s.employee_totals:
             cur_t = merged_totals.get(t.Category)
             if cur_t is None:
-                merged_totals[t.Category] = MonthlyEmployeeTotal(**t.__dict__)
+                merged_totals[t.Category] = MonthlyEmployeeTotal(
+                    Category=t.Category,
+                    BasicHours=t.BasicHours,
+                    MonFriOvertime=t.MonFriOvertime,
+                    SatSunOvertime=t.SatSunOvertime,
+                    AnnualHoliday=t.AnnualHoliday,
+                    TotalPaidHours=t.TotalPaidHours,
+                )
                 continue
             cur_t.BasicHours += t.BasicHours
             cur_t.MonFriOvertime += t.MonFriOvertime
@@ -328,7 +553,9 @@ def build_monthly_excel_bytes(
             cur_t.AnnualHoliday += t.AnnualHoliday
             cur_t.TotalPaidHours += t.TotalPaidHours
 
-    non_hourly_names = {n.strip().upper() for n in (non_hourly_names or set()) if n and n.strip()}
+    non_hourly_names = {
+        n.strip().upper() for n in (non_hourly_names or set()) if n and n.strip()
+    }
     for e in merged_employees.values():
         if e.Name.strip().upper() in non_hourly_names:
             e.IsHourly = False
@@ -352,7 +579,7 @@ def build_monthly_excel_bytes(
     r += 2
     _write_total_header(ws, r)
     r += 1
-    non_agency_summary = [0.0, 0.0, 0.0, 0.0, 0.0]
+    non_agency_summary = [_ZERO, _ZERO, _ZERO, _ZERO, _ZERO]
     for t in merged_totals.values():
         ws.cell(r, 2, t.Category)
         ws.cell(r, 4, t.BasicHours)
@@ -366,14 +593,18 @@ def build_monthly_excel_bytes(
             non_agency_summary[2] += t.SatSunOvertime
             non_agency_summary[3] += t.AnnualHoliday
             non_agency_summary[4] += t.TotalPaidHours
-        non_hourly = [e for e in merged_employees.values() if not e.IsHourly and e.Category.upper() == t.Category.upper()]
+        non_hourly = [
+            e
+            for e in merged_employees.values()
+            if not e.IsHourly and e.Category.upper() == t.Category.upper()
+        ]
         if non_hourly:
             ws.cell(r + 1, 2, f"{t.Category} non-hourly hours")
-            ws.cell(r + 1, 4, -sum(e.BasicHours for e in non_hourly))
-            ws.cell(r + 1, 5, -sum(e.MonFriOvertime for e in non_hourly))
-            ws.cell(r + 1, 6, -sum(e.SatSunOvertime for e in non_hourly))
-            ws.cell(r + 1, 7, -sum(e.AnnualHoliday for e in non_hourly))
-            ws.cell(r + 1, 8, -sum(e.TotalPaidHours for e in non_hourly))
+            ws.cell(r + 1, 4, -sum((e.BasicHours for e in non_hourly), _ZERO))
+            ws.cell(r + 1, 5, -sum((e.MonFriOvertime for e in non_hourly), _ZERO))
+            ws.cell(r + 1, 6, -sum((e.SatSunOvertime for e in non_hourly), _ZERO))
+            ws.cell(r + 1, 7, -sum((e.AnnualHoliday for e in non_hourly), _ZERO))
+            ws.cell(r + 1, 8, -sum((e.TotalPaidHours for e in non_hourly), _ZERO))
             r += 2
         else:
             r += 1
@@ -383,7 +614,7 @@ def build_monthly_excel_bytes(
     for m in grouped_from_weeks:
         for k, t in m.items():
             if k not in agg_grouped:
-                agg_grouped[k] = MonthlyEmployeeTotal(k, 0.0, 0.0, 0.0, 0.0, 0.0)
+                agg_grouped[k] = MonthlyEmployeeTotal(Category=k)
             a = agg_grouped[k]
             a.BasicHours += t.BasicHours
             a.MonFriOvertime += t.MonFriOvertime

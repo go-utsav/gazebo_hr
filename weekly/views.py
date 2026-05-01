@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET, require_http_methods
 
 from .monthly_service import (
 	build_monthly_excel_bytes,
+	detect_category_conflicts,
 	monthly_summaries_from_json,
 	monthly_summaries_to_json,
 	parse_monthly_inputs,
@@ -346,6 +347,12 @@ def monthly_report(request: HttpRequest):
 					if e.Name.strip().upper() in non_hourly and e.Category.strip().startswith('A-'):
 						messages.error(request, f'Agency employee must be hourly: {e.Name}')
 						return redirect('weekly:monthly_report')
+			for conflict in detect_category_conflicts(summaries):
+				cats = ', '.join(conflict.categories)
+				messages.warning(
+					request,
+					f'Employee {conflict.name} (SageNo {conflict.sage_no}) appears in multiple categories across weeks: {cats}',
+				)
 			request.session['monthly_last'] = {
 				'summaries_json': monthly_summaries_to_json(summaries),
 				'non_hourly': sorted(non_hourly),
