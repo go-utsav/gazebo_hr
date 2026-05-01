@@ -23,6 +23,12 @@ from .payroll_service import (
 	parse_employee_hours,
 	total_paid_hours_from_rows,
 )
+from .export_service import (
+	add_branding_cover_sheet,
+	build_csv_bytes,
+	build_pdf_bytes,
+	export_filename,
+)
 
 
 def _hours_to_float(value: Any) -> float:
@@ -406,10 +412,14 @@ def health_api(request: HttpRequest):
 	return JsonResponse({'ok': True, 'app': 'weekly'})
 
 
+def _weekly_session_data(request: HttpRequest) -> tuple[list[dict], dict]:
+	result_data = request.session.get('weekly_last_result', {})
+	return result_data.get('rows', []), result_data.get('summary', {})
+
+
 @require_GET
 def download_weekly_excel(request: HttpRequest):
-	result_data = request.session.get('weekly_last_result', {})
-	rows = result_data.get('rows', [])
+	rows, summary = _weekly_session_data(request)
 	if not rows:
 		messages.error(request, 'No processed data available. Upload files first.')
 		return redirect('weekly:weekly_report')
@@ -423,11 +433,39 @@ def download_weekly_excel(request: HttpRequest):
 		total_paid_hours=total_paid_hours_from_rows(rows),
 	)
 	file_bytes = build_excel_bytes(payroll_result)
+	try:
+		file_bytes = add_branding_cover_sheet(file_bytes, summary=summary)
+	except Exception:
+		pass
 	response = HttpResponse(
 		file_bytes,
 		content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 	)
-	response['Content-Disposition'] = 'attachment; filename="weekly_report_output.xlsx"'
+	response['Content-Disposition'] = f'attachment; filename="{export_filename("gazebo_weekly_report", "xlsx")}"'
+	return response
+
+
+@require_GET
+def download_weekly_csv(request: HttpRequest):
+	rows, summary = _weekly_session_data(request)
+	if not rows:
+		messages.error(request, 'No processed data available. Upload files first.')
+		return redirect('weekly:weekly_report')
+	file_bytes = build_csv_bytes(rows, summary=summary)
+	response = HttpResponse(file_bytes, content_type='text/csv; charset=utf-8')
+	response['Content-Disposition'] = f'attachment; filename="{export_filename("gazebo_weekly_report", "csv")}"'
+	return response
+
+
+@require_GET
+def download_weekly_pdf(request: HttpRequest):
+	rows, summary = _weekly_session_data(request)
+	if not rows:
+		messages.error(request, 'No processed data available. Upload files first.')
+		return redirect('weekly:weekly_report')
+	file_bytes = build_pdf_bytes(rows, summary=summary)
+	response = HttpResponse(file_bytes, content_type='application/pdf')
+	response['Content-Disposition'] = f'attachment; filename="{export_filename("gazebo_weekly_report", "pdf")}"'
 	return response
 
 

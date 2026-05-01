@@ -3,6 +3,91 @@
 {% if weekly_analytics %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 {% endif %}
+<style>
+.processing-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(15, 23, 42, 0.55);
+	backdrop-filter: blur(4px);
+	-webkit-backdrop-filter: blur(4px);
+	display: none;
+	align-items: center;
+	justify-content: center;
+	z-index: 1080;
+}
+.processing-overlay.is-active { display: flex; }
+.processing-overlay__card {
+	background: #fff;
+	border-radius: 14px;
+	padding: 1.5rem 2rem;
+	min-width: 280px;
+	max-width: 90vw;
+	text-align: center;
+	box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+}
+.processing-overlay__spinner {
+	width: 56px;
+	height: 56px;
+	margin: 0 auto 1rem;
+	border-radius: 50%;
+	border: 5px solid #e9ecef;
+	border-top-color: #003078;
+	animation: gz-spin 0.9s linear infinite;
+}
+@keyframes gz-spin {
+	to { transform: rotate(360deg); }
+}
+.processing-overlay__title {
+	font-weight: 700;
+	font-size: 1.1rem;
+	margin-bottom: 0.25rem;
+	color: #003078;
+}
+.processing-overlay__sub {
+	font-size: 0.875rem;
+	color: #555;
+}
+.results-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem 1rem;
+	padding: 0.85rem 1rem;
+	background: #fff;
+	border: 1px solid var(--bs-border-color, #dee2e6);
+	border-radius: 10px;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+.results-toolbar__stats {
+	flex: 1 1 auto;
+	min-width: 220px;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1rem;
+	font-size: 0.875rem;
+	color: #444;
+}
+.results-toolbar__stats span strong { color: #003078; }
+.results-toolbar__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+.weekly-data-card .table-responsive {
+	max-height: 60vh;
+	overflow: auto;
+}
+.weekly-data-card thead.sticky-top th {
+	background: #f1f4f8;
+	box-shadow: inset 0 -1px 0 rgba(0,0,0,0.08);
+}
+.weekly-charts-section { display: none; }
+.weekly-charts-section.is-open { display: block; }
+@media (max-width: 575.98px) {
+	.results-toolbar { padding: 0.75rem; }
+	.weekly-data-card .table-responsive { max-height: 70vh; }
+}
+</style>
 {% endblock %}
 {% block dashboard_content %}
 <h1 class="heading-xl">{{ page_heading }}</h1>
@@ -36,13 +121,17 @@
 	<div class="modal-dialog modal-lg modal-dialog-scrollable">
 		<div class="modal-content">
 			<div class="modal-header">
-				<h2 class="modal-title h5" id="helpEmployeeModalLabel">Employee hours file</h2>
+				<h2 class="modal-title h5" id="helpEmployeeModalLabel">Employee hours report</h2>
 				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close help"></button>
 			</div>
 			<div class="modal-body help-prose small" tabindex="-1">
-				<p class="mb-2"><span class="fw-bold text-body">What it is</span> — your payroll or time system export of hours for the week (e.g. paysummary / gross / clock export).</p>
-				<p class="mb-2"><span class="fw-bold text-body">Where to get it</span> — export from the system you already use (e.g. payroll software or time &amp; attendance) as <strong>.xls</strong> or <strong>.xlsx</strong>. The export must include a <strong>Pay ID</strong> column so each row can be matched; that ID is the same as the <strong>Payroll / Sage</strong> number in HR.</p>
-				<p class="mb-0"><span class="fw-bold text-body">What we need in the file</span> — at minimum: employee name, Pay ID, and the hour bands the report uses (basic, overtime, holiday, etc., depending on your file layout). If the layout changes, check that the <strong>Pay ID</strong> column is still present.</p>
+				<ol class="mb-3 ps-3">
+					<li>Open <strong>ClockRite</strong> software</li>
+					<li>Go to <strong>Print Report</strong> (Top left corner).</li>
+					<li>Select from dropdown menu <strong>Paid Hour (Incl. Absence) Summary</strong></li>
+					<li>Export as <strong>Excel 7.0 format (.xls)</strong></li>
+				</ol>
+				<p class="mb-0">Use that exported file here as <strong>Employee hours file (.xls / .xlsx)</strong>.</p>
 			</div>
 		</div>
 	</div>
@@ -52,13 +141,17 @@
 	<div class="modal-dialog modal-lg modal-dialog-scrollable">
 		<div class="modal-content">
 			<div class="modal-header">
-				<h2 class="modal-title h5" id="helpContractModalLabel">Contract hours file</h2>
+				<h2 class="modal-title h5" id="helpContractModalLabel">Procedure to generate Employee Contract hours excel file:</h2>
 				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close help"></button>
 			</div>
 			<div class="modal-body help-prose small" tabindex="-1">
-				<p class="mb-2"><span class="fw-bold text-body">What it is</span> — the agreed <strong>contracted hours</strong> per person for comparison with paid hours.</p>
-				<p class="mb-2"><span class="fw-bold text-body">Where to get it</span> — from <strong>Clockrite</strong> (or the system that holds your contracts). Typical path: run an <strong>Employee details</strong> (or &ldquo;Advanced&rdquo;) type report and export to Excel, so each person shows a <strong>Payroll number</strong> and <strong>Contract hours</strong> (sometimes on separate label rows in the same block &mdash; the app supports that format).</p>
-				<p class="mb-0"><span class="fw-bold text-body">What we need</span> — each person&rsquo;s <strong>Payroll number</strong> must match the <strong>Pay ID</strong> in the employee hours file. <strong>Contract hours</strong> of <strong>0</strong> is valid and still joins correctly for overtime maths.</p>
+				<ol class="mb-3 ps-3">
+					<li>Open <strong>ClockRite</strong> software</li>
+					<li>Go to <strong>Print Report</strong> (Top left corner).</li>
+					<li>Select <strong>Employee Details (Advanced)</strong></li>
+					<li>Export as <strong>Excel 7.0 format (.xls)</strong></li>
+				</ol>
+				<p class="mb-0">Use that exported file here as <strong>Employee Contract hours excel file</strong>.</p>
 			</div>
 		</div>
 	</div>
@@ -86,9 +179,17 @@
 			</div>
 			<div class="d-flex flex-wrap gap-2 align-items-center">
 				{% include "weekly/components/button_submit.html" with label="Process files" variant="primary" id="btn-process-files" %}
-				<a class="btn btn-outline-secondary" href="{% url 'weekly:weekly_download' %}">Download Excel</a>
+				{% if summary.total_rows %}<a class="btn btn-outline-secondary" href="#weekly-results">View latest results</a>{% endif %}
 			</div>
 		</form>
+	</div>
+</div>
+
+<div class="processing-overlay" id="weekly-processing-overlay" role="status" aria-live="polite" aria-hidden="true">
+	<div class="processing-overlay__card">
+		<div class="processing-overlay__spinner" aria-hidden="true"></div>
+		<div class="processing-overlay__title">Processing your files</div>
+		<div class="processing-overlay__sub">Reading spreadsheets, joining contracts, calculating overtime…<br>This usually takes a few seconds.</div>
 	</div>
 </div>
 
@@ -101,9 +202,29 @@
 {% endif %}
 
 {% if summary.total_rows %}
-<div class="card shadow-sm mt-3">
-	<div class="card-body">
-		<p class="mb-0"><strong>Rows:</strong> {{ summary.total_rows }} | <strong>Agency:</strong> {{ summary.agency_rows }} | <strong>Gazebo:</strong> {{ summary.gazebo_rows }} | <strong>Total paid hours:</strong> {{ summary.total_paid_hours }}</p>
+<div id="weekly-results" class="results-toolbar mt-3">
+	<div class="results-toolbar__stats">
+		<span><strong>Rows:</strong> {{ summary.total_rows }}</span>
+		<span><strong>Agency:</strong> {{ summary.agency_rows }}</span>
+		<span><strong>Gazebo:</strong> {{ summary.gazebo_rows }}</span>
+		<span><strong>Total paid hours:</strong> {{ summary.total_paid_hours }}</span>
+	</div>
+	<div class="results-toolbar__actions">
+		<button type="button" class="btn btn-outline-primary btn-sm" id="btn-toggle-charts" aria-expanded="false" aria-controls="weekly-charts-section">
+			<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true" class="me-1"><path d="M4 11H2v3h2v-3zm5-4H7v7h2V7zm5-5v12h-2V2h2zM2 10a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1H2zm5-4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H7zm5-5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1h-2z"/></svg>
+			<span class="btn-toggle-charts__label">View graphs</span>
+		</button>
+		<div class="btn-group">
+			<button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true" class="me-1"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+				Export data
+			</button>
+			<ul class="dropdown-menu dropdown-menu-end">
+				<li><a class="dropdown-item" href="{% url 'weekly:weekly_download' %}">Excel (.xlsx)</a></li>
+				<li><a class="dropdown-item" href="{% url 'weekly:weekly_download_csv' %}">CSV (.csv)</a></li>
+				<li><a class="dropdown-item" href="{% url 'weekly:weekly_download_pdf' %}">PDF (.pdf)</a></li>
+			</ul>
+		</div>
 	</div>
 </div>
 {% endif %}
@@ -111,6 +232,7 @@
 {% if weekly_analytics %}
 {{ weekly_analytics.chart|json_script:"weekly-analytics-chart-data" }}
 {{ weekly_analytics.extra_charts|json_script:"weekly-analytics-extra-data" }}
+<section id="weekly-charts-section" class="weekly-charts-section" aria-hidden="true">
 <div class="row g-3 mt-3">
 	<div class="col-lg-5">
 		<div class="card shadow-sm h-100">
@@ -210,10 +332,11 @@
 		</div>
 	</div>
 </div>
+</section>
 {% endif %}
 
 {% if preview_rows %}
-<div class="card shadow-sm mt-3" id="weekly-report-preview">
+<div class="card shadow-sm mt-3 weekly-data-card" id="weekly-report-preview">
 	<div class="card-body">
 		<div class="weekly-preview-toolbar" id="weekly-preview-toolbar">
 			<label class="d-flex flex-column gap-1 weekly-preview-toolbar__field small">
@@ -232,8 +355,8 @@
 			</div>
 		</div>
 		<div class="table-responsive">
-			<table class="table table-sm table-striped table-hover" style="width:100%;">
-				<thead>
+			<table class="table table-sm table-striped table-hover mb-0" style="width:100%;">
+				<thead class="sticky-top">
 					<tr>
 						<th scope="col">Name</th>
 						<th scope="col">Category</th>
@@ -285,6 +408,7 @@
 	}
 
 	var form = document.getElementById('weekly-upload-form');
+	var overlay = document.getElementById('weekly-processing-overlay');
 	if (form) {
 		var btnProcess = document.getElementById('btn-process-files');
 		form.addEventListener('submit', function () {
@@ -292,6 +416,34 @@
 			btnProcess.disabled = true;
 			if (!btnProcess.getAttribute('data-orig')) btnProcess.setAttribute('data-orig', btnProcess.textContent);
 			btnProcess.textContent = 'Processing…';
+			if (overlay) {
+				overlay.classList.add('is-active');
+				overlay.setAttribute('aria-hidden', 'false');
+			}
+		});
+	}
+	window.addEventListener('pageshow', function () {
+		if (overlay) {
+			overlay.classList.remove('is-active');
+			overlay.setAttribute('aria-hidden', 'true');
+		}
+	});
+
+	var toggleBtn = document.getElementById('btn-toggle-charts');
+	var chartsSection = document.getElementById('weekly-charts-section');
+	if (toggleBtn && chartsSection) {
+		toggleBtn.addEventListener('click', function () {
+			var open = chartsSection.classList.toggle('is-open');
+			toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+			chartsSection.setAttribute('aria-hidden', open ? 'false' : 'true');
+			var label = toggleBtn.querySelector('.btn-toggle-charts__label');
+			if (label) label.textContent = open ? 'Hide graphs' : 'View graphs';
+			if (open && typeof window.__weeklyInitCharts === 'function') {
+				window.__weeklyInitCharts();
+			}
+			if (open) {
+				chartsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			}
 		});
 	}
 })();
@@ -344,44 +496,44 @@
 	});
 })();
 (function () {
-	var dataEl = document.getElementById('weekly-analytics-chart-data');
-	var canvas = document.getElementById('weekly-hours-chart');
-	if (!dataEl || !canvas || typeof Chart === 'undefined') return;
-	var payload;
-	try {
-		payload = JSON.parse(dataEl.textContent);
-	} catch (e) {
-		return;
-	}
-	var labels = payload.labels || [];
-	var counts = payload.counts || [];
-	new Chart(canvas.getContext('2d'), {
-		type: 'bar',
-		data: {
-			labels: labels,
-			datasets: [{
-				label: 'People',
-				data: counts,
-				backgroundColor: ['#5694ca', '#85994b', '#f47738', '#b10e1e'],
-				borderWidth: 0
-			}]
-		},
-		options: {
-			responsive: true,
-			maintainAspectRatio: false,
-			plugins: {
-				legend: { display: false }
+	var initialised = false;
+	window.__weeklyInitCharts = function () {
+		if (initialised) return;
+		if (typeof Chart === 'undefined') return;
+		initialised = true;
+		_drawHoursChart();
+		_drawExtraCharts();
+	};
+
+	function _drawHoursChart() {
+		var dataEl = document.getElementById('weekly-analytics-chart-data');
+		var canvas = document.getElementById('weekly-hours-chart');
+		if (!dataEl || !canvas) return;
+		var payload;
+		try { payload = JSON.parse(dataEl.textContent); } catch (e) { return; }
+		var labels = payload.labels || [];
+		var counts = payload.counts || [];
+		new Chart(canvas.getContext('2d'), {
+			type: 'bar',
+			data: {
+				labels: labels,
+				datasets: [{
+					label: 'People',
+					data: counts,
+					backgroundColor: ['#5694ca', '#85994b', '#f47738', '#b10e1e'],
+					borderWidth: 0
+				}]
 			},
-			scales: {
-				y: {
-					beginAtZero: true,
-					ticks: { precision: 0 }
-				}
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: { legend: { display: false } },
+				scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
 			}
-		}
-	});
-})();
-(function () {
+		});
+	}
+
+	function _drawExtraCharts() {
 	var dataEl = document.getElementById('weekly-analytics-extra-data');
 	if (!dataEl || typeof Chart === 'undefined') return;
 	var extra;
@@ -500,6 +652,7 @@
 				}
 			}
 		});
+	}
 	}
 })();
 </script>
