@@ -410,7 +410,37 @@ class MonthlyGazeboAllDataTest(unittest.TestCase):
         self.assertIn("Diff", labels)
         monthly_emp_row = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 2).value == "MONTHLY")
         self.assertEqual(ws.cell(monthly_emp_row, 3).value, "EMP")
-        self.assertAlmostEqual(float(ws.cell(monthly_emp_row, 8).value), week.emp_agency_bands["EMP"]["TotalPaidHours"] * 4, places=1)
+        monthly_total_formula = str(ws.cell(monthly_emp_row, 8).value)
+        self.assertTrue(monthly_total_formula.startswith("="))
+        self.assertIn("'Week1'!", monthly_total_formula)
+        self.assertIn("'Week4'!", monthly_total_formula)
+        cat_formula = None
+        for r in range(1, ws.max_row + 1):
+            val = ws.cell(r, 4).value
+            if isinstance(val, str) and val.startswith("=SUMIFS"):
+                cat_formula = val
+                break
+        self.assertIsNotNone(cat_formula, "Expected SUMIFS formula in category totals")
+        emp_formula = None
+        for r in range(1, ws.max_row + 1):
+            val = ws.cell(r, 4).value
+            if isinstance(val, str) and "SUMIF('Week1'!" in val:
+                emp_formula = val
+                break
+        self.assertIsNotNone(emp_formula, "Expected cross-week SUMIF on Summary employee table")
+        diff_emp_row = next(
+            r for r in range(1, ws.max_row + 1)
+            if ws.cell(r, 2).value == "Diff" and ws.cell(r, 3).value == "EMP"
+        )
+        diff_total_row = diff_emp_row + 2
+        self.assertEqual(ws.cell(diff_total_row, 3).value, "TOTAL")
+        diff_total_formula = str(ws.cell(diff_total_row, 8).value)
+        self.assertIn("-H", diff_total_formula)
+        self.assertNotIn("'Week1'!", diff_total_formula, "Diff TOTAL should reference MONTHLY row, not raw week sum")
+        monthly_emp_row = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 2).value == "MONTHLY")
+        monthly_total_row = monthly_emp_row + 2
+        self.assertEqual(ws.cell(monthly_total_row, 3).value, "TOTAL")
+        self.assertIn(f"H{monthly_total_row}", diff_total_formula)
         wb.close()
 
     def test_week_sheet_has_emp_agency_in_col_c(self) -> None:
@@ -422,7 +452,16 @@ class MonthlyGazeboAllDataTest(unittest.TestCase):
         wb = load_workbook(BytesIO(data), read_only=True)
         ws = wb["Week1"]
         emp_row = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 3).value == "EMP")
-        self.assertEqual(ws.cell(emp_row, 4).value, week.emp_agency_bands["EMP"]["BasicHours"])
+        emp_basic = str(ws.cell(emp_row, 4).value)
+        self.assertTrue(emp_basic.startswith("=SUM("))
+        agency_row = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 3).value == "AGENCY")
+        agency_basic = str(ws.cell(agency_row, 4).value)
+        self.assertTrue(agency_basic.startswith("=SUMPRODUCT"))
+        cat_row = next(
+            r for r in range(1, ws.max_row + 1)
+            if isinstance(ws.cell(r, 4).value, str) and str(ws.cell(r, 4).value).startswith("=SUMIFS")
+        )
+        self.assertIn("$B$", str(ws.cell(cat_row, 4).value))
         wb.close()
 
 

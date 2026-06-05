@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 
 _BAND_KEYS = ("BasicHours", "MonFriOvertime", "SatSunOvertime", "AnnualHoliday", "TotalPaidHours")
@@ -76,6 +77,28 @@ class MonthlyWeekSummary:
     non_agency_total: float = 0.0
     grouped_totals: dict[str, MonthlyEmployeeTotal] = field(default_factory=dict)
     emp_agency_bands: dict[str, dict[str, float]] = field(default_factory=dict)
+
+
+@dataclass
+class EmployeeTableLayout:
+    header_row: int
+    data_start: int
+    data_end: int
+    next_row: int
+
+
+@dataclass
+class EmpAgencyLayout:
+    header_row: int
+    rows: dict[str, int]
+    next_row: int
+
+
+@dataclass
+class WeekSheetLayout:
+    sheet_name: str
+    employee: EmployeeTableLayout
+    emp_agency: EmpAgencyLayout
 
 
 def _to_text(value: Any) -> str:
@@ -392,7 +415,9 @@ def _apply_table_style(
                 cell.fill = _HEADER_FILL
                 cell.font = _HEADER_FONT
                 cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            elif isinstance(cell.value, (int, float)):
+            elif isinstance(cell.value, (int, float)) or (
+                isinstance(cell.value, str) and str(cell.value).startswith("=")
+            ):
                 cell.number_format = _NUM_FORMAT
                 cell.alignment = Alignment(horizontal="right", vertical="center")
 
@@ -429,6 +454,61 @@ def _write_section_title(ws, r: int, title: str, subtitle: str = "") -> int:
         ws.cell(r, 1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
         r += 1
     return r
+
+
+def _band_col_index(band_index: int) -> int:
+    """0-based index into _BAND_KEYS -> Excel column (D=4)."""
+    return 4 + band_index
+
+
+def _xl_sumifs_category(row: int, data_start: int, data_end: int, band_col: int) -> str:
+    col = get_column_letter(band_col)
+    if data_end < data_start:
+        return "=0"
+    return (
+        f"=SUMIFS(${col}${data_start}:${col}${data_end},"
+        f"$B${data_start}:$B${data_end},$B{row})"
+    )
+
+
+def _xl_sumproduct_agency(data_start: int, data_end: int, band_col: int) -> str:
+    col = get_column_letter(band_col)
+    if data_end < data_start:
+        return "=0"
+    return (
+        f'=SUMPRODUCT((LEFT($B${data_start}:$B${data_end},2)="A-")*'
+        f"(${col}${data_start}:${col}${data_end}))"
+    )
+
+
+def _xl_emp_band(data_start: int, data_end: int, band_col: int, agency_row: int) -> str:
+    col = get_column_letter(band_col)
+    if data_end < data_start:
+        return "=0"
+    return f"=SUM(${col}${data_start}:${col}${data_end})-{col}{agency_row}"
+
+
+def _xl_total_band(emp_row: int, agency_row: int, band_col: int) -> str:
+    col = get_column_letter(band_col)
+    return f"={col}{emp_row}+{col}{agency_row}"
+
+
+def _xl_cross_week_sumif(name_cell: str, week_sheet_names: list[str], band_col: int) -> str:
+    col = get_column_letter(band_col)
+    parts = [
+        f"SUMIF('{sheet}'!$A:$A,{name_cell},'{sheet}'!${col}:${col})"
+        for sheet in week_sheet_names
+    ]
+    return "=" + "+".join(parts)
+
+
+def _xl_sum_week_emp_cells(week_layouts: list[WeekSheetLayout], row_key: str, band_col: int) -> str:
+    col = get_column_letter(band_col)
+    parts = [
+        f"'{layout.sheet_name}'!{col}{layout.emp_agency.rows[row_key]}"
+        for layout in week_layouts
+    ]
+    return "=" + "+".join(parts)
 
 
 def _write_employee_header(ws, r: int) -> None:
@@ -474,6 +554,38 @@ def _write_total_row(ws, r: int, category: str, t: MonthlyEmployeeTotal) -> None
     ws.cell(r, 8, t.TotalPaidHours)
 
 
+def _write_emp_agency_block_formulas(
+    ws,
+    r: int,
+    emp_layout: EmployeeTableLayout,
+    *,
+    row_label: str | None = None,
+) -> tuple[int, dict[str, int]]:
+    """Write EMP/AGENCY/TOTAL with SUMPRODUCT/SUM formulas from employee table."""
+    block_start = r
+    ds, de = emp_layout.data_start, emp_layout.data_end
+    emp_row = r
+    agency_row = r + 1
+    total_row = r + 2
+
+    if row_label:
+        ws.cell(r, 2, row_label)
+
+    ws.cell(emp_row, 3, "EMP")
+    ws.cell(agency_row, 3, "AGENCY")
+    ws.cell(total_row, 3, "TOTAL")
+
+    for j in range(5):
+        col = _band_col_index(j)
+        ws.cell(agency_row, col, _xl_sumproduct_agency(ds, de, col))
+        ws.cell(emp_row, col, _xl_emp_band(ds, de, col, agency_row))
+        ws.cell(total_row, col, _xl_total_band(emp_row, agency_row, col))
+
+    row_map = {"EMP": emp_row, "AGENCY": agency_row, "TOTAL": total_row}
+    _apply_table_style(ws, block_start, total_row, 2, _SHEET_LAST_COL)
+    return total_row + 1, row_map
+
+
 def _write_emp_agency_block(
     ws,
     r: int,
@@ -495,18 +607,195 @@ def _write_emp_agency_block(
     return r
 
 
-def _write_employee_table(ws, r: int, employees: list[MonthlyEmployee], section_title: str, subtitle: str) -> int:
+def _write_emp_agency_section_formulas(
+    ws,
+    r: int,
+    emp_layout: EmployeeTableLayout,
+    section_title: str,
+    subtitle: str,
+    *,
+    row_label: str | None = None,
+) -> EmpAgencyLayout:
     r = _write_section_title(ws, r, section_title, subtitle)
+    header_row = r
+    _write_total_header(ws, r)
+    r += 1
+    r, row_map = _write_emp_agency_block_formulas(ws, r, emp_layout, row_label=row_label)
+    _apply_table_style(ws, header_row, header_row, 2, _SHEET_LAST_COL, header_row=header_row)
+    return EmpAgencyLayout(header_row=header_row, rows=row_map, next_row=r + 1)
+
+
+def _write_emp_agency_section_monthly_formulas(
+    ws,
+    r: int,
+    week_layouts: list[WeekSheetLayout],
+    section_title: str,
+    subtitle: str,
+) -> tuple[int, EmpAgencyLayout]:
+    r = _write_section_title(ws, r, section_title, subtitle)
+    header_row = r
+    _write_total_header(ws, r)
+    r += 1
+    block_start = r
+    ws.cell(r, 2, "MONTHLY")
+    row_map: dict[str, int] = {}
+    for i, key in enumerate(_EMP_AGENCY_ROWS):
+        row_map[key] = r
+        ws.cell(r, 3, key)
+        for j in range(5):
+            ws.cell(r, _band_col_index(j), _xl_sum_week_emp_cells(week_layouts, key, _band_col_index(j)))
+        r += 1
+    _apply_table_style(ws, block_start, r - 1, 2, _SHEET_LAST_COL)
+    _apply_table_style(ws, header_row, header_row, 2, _SHEET_LAST_COL, header_row=header_row)
+    return r + 1, EmpAgencyLayout(header_row=header_row, rows=row_map, next_row=r + 1)
+
+
+def _write_emp_agency_block_week_refs(
+    ws,
+    r: int,
+    week_layout: WeekSheetLayout,
+    *,
+    row_label: str | None = None,
+) -> int:
+    """Per-week block on Summary referencing Week sheet EMP/AGENCY/TOTAL cells."""
+    block_start = r
+    for i, key in enumerate(_EMP_AGENCY_ROWS):
+        if row_label and i == 0:
+            ws.cell(r, 2, row_label)
+        ws.cell(r, 3, key)
+        src_row = week_layout.emp_agency.rows[key]
+        for j in range(5):
+            col = _band_col_index(j)
+            ws.cell(r, col, f"='{week_layout.sheet_name}'!{get_column_letter(col)}{src_row}")
+        r += 1
+    _apply_table_style(ws, block_start, r - 1, 2, _SHEET_LAST_COL)
+    return r
+
+
+def _write_emp_agency_section_diff_formulas(
+    ws,
+    r: int,
+    summary_emp_layout: EmployeeTableLayout,
+    monthly_layout: EmpAgencyLayout,
+    section_title: str,
+    subtitle: str,
+) -> int:
+    r = _write_section_title(ws, r, section_title, subtitle)
+    header_row = r
+    _write_total_header(ws, r)
+    r += 1
+    ds, de = summary_emp_layout.data_start, summary_emp_layout.data_end
+
+    emp_merged_row = r
+    ws.cell(emp_merged_row, 3, "EMP")
+    agency_merged_row = r + 1
+    ws.cell(agency_merged_row, 3, "AGENCY")
+    total_merged_row = r + 2
+    ws.cell(total_merged_row, 3, "TOTAL")
+    ws.cell(emp_merged_row, 2, "Merged (employees)")
+
+    for j in range(5):
+        col = _band_col_index(j)
+        ws.cell(agency_merged_row, col, _xl_sumproduct_agency(ds, de, col))
+        ws.cell(emp_merged_row, col, _xl_emp_band(ds, de, col, agency_merged_row))
+        ws.cell(total_merged_row, col, _xl_total_band(emp_merged_row, agency_merged_row, col))
+
+    merged_rows = {"EMP": emp_merged_row, "AGENCY": agency_merged_row, "TOTAL": total_merged_row}
+    diff_row_start = r + 3
+    ws.cell(diff_row_start, 2, "Diff")
+
+    for i, key in enumerate(_EMP_AGENCY_ROWS):
+        row = diff_row_start + i
+        ws.cell(row, 3, key)
+        for j in range(5):
+            col = _band_col_index(j)
+            cl = get_column_letter(col)
+            ws.cell(row, col, f"={cl}{merged_rows[key]}-{cl}{monthly_layout.rows[key]}")
+        r = row + 1
+
+    _apply_table_style(ws, header_row, r - 1, 2, _SHEET_LAST_COL, header_row=header_row)
+    return r + 1
+
+
+def _write_employee_table_cross_week(
+    ws,
+    r: int,
+    employees: list[MonthlyEmployee],
+    section_title: str,
+    subtitle: str,
+    week_sheet_names: list[str],
+) -> EmployeeTableLayout:
+    r = _write_section_title(
+        ws,
+        r,
+        section_title,
+        subtitle + " Totals use Excel formulas — click any hour cell to see Week sheet references.",
+    )
     header_row = r
     _write_employee_header(ws, r)
     r += 1
+    data_start = r
     for e in employees:
-        _write_employee_row(ws, r, e)
+        ws.cell(r, 1, e.Name)
+        ws.cell(r, 2, e.Category)
+        ws.cell(r, 3, e.SageNo)
+        name_ref = f"$A{r}"
+        for j in range(5):
+            ws.cell(r, _band_col_index(j), _xl_cross_week_sumif(name_ref, week_sheet_names, _band_col_index(j)))
         r += 1
+    data_end = r - 1 if employees else data_start - 1
     if employees:
         _apply_table_style(ws, header_row, r - 1, 1, _SHEET_LAST_COL, header_row=header_row)
     else:
         _apply_table_style(ws, header_row, header_row, 1, _SHEET_LAST_COL, header_row=header_row)
+    return EmployeeTableLayout(header_row=header_row, data_start=data_start, data_end=data_end, next_row=r + 1)
+
+
+def _write_employee_table_source(
+    ws,
+    r: int,
+    employees: list[MonthlyEmployee],
+    section_title: str,
+    subtitle: str,
+) -> EmployeeTableLayout:
+    r = _write_section_title(ws, r, section_title, subtitle)
+    header_row = r
+    _write_employee_header(ws, r)
+    r += 1
+    data_start = r
+    for e in employees:
+        _write_employee_row(ws, r, e)
+        r += 1
+    data_end = r - 1 if employees else data_start - 1
+    if employees:
+        _apply_table_style(ws, header_row, r - 1, 1, _SHEET_LAST_COL, header_row=header_row)
+    else:
+        _apply_table_style(ws, header_row, header_row, 1, _SHEET_LAST_COL, header_row=header_row)
+    return EmployeeTableLayout(header_row=header_row, data_start=data_start, data_end=data_end, next_row=r + 1)
+
+
+def _write_totals_table_formulas(
+    ws,
+    r: int,
+    categories: list[str],
+    emp_layout: EmployeeTableLayout,
+    section_title: str,
+    subtitle: str,
+) -> int:
+    if not categories:
+        return r
+    r = _write_section_title(ws, r, section_title, subtitle)
+    header_row = r
+    _write_total_header(ws, r)
+    r += 1
+    data_start = r
+    ds, de = emp_layout.data_start, emp_layout.data_end
+    for category in categories:
+        ws.cell(r, 2, category)
+        for j in range(5):
+            ws.cell(r, _band_col_index(j), _xl_sumifs_category(r, ds, de, _band_col_index(j)))
+        r += 1
+    _apply_table_style(ws, header_row, r - 1, 1, _SHEET_LAST_COL, header_row=header_row)
     return r + 1
 
 
@@ -570,6 +859,48 @@ def _write_emp_agency_section(
     return r + 1
 
 
+def _write_summary_category_formulas(
+    ws,
+    r: int,
+    categories: list[str],
+    emp_layout: EmployeeTableLayout,
+    merged_employees: dict[str, MonthlyEmployee],
+) -> int:
+    r = _write_section_title(
+        ws,
+        r,
+        "Category totals (month)",
+        "Sum of hours by work category — calculated with SUMIFS from the employee table above.",
+    )
+    header_row = r
+    _write_total_header(ws, r)
+    r += 1
+    cat_data_start = r
+    ds, de = emp_layout.data_start, emp_layout.data_end
+    for category in categories:
+        ws.cell(r, 2, category)
+        for j in range(5):
+            ws.cell(r, _band_col_index(j), _xl_sumifs_category(r, ds, de, _band_col_index(j)))
+        r += 1
+        non_hourly = [
+            e for e in merged_employees.values()
+            if not e.IsHourly and e.Category.upper() == category.upper()
+        ]
+        if non_hourly:
+            ws.cell(r, 2, f"{category} non-hourly hours")
+            ws.cell(r, 4, -sum(e.BasicHours for e in non_hourly))
+            ws.cell(r, 5, -sum(e.MonFriOvertime for e in non_hourly))
+            ws.cell(r, 6, -sum(e.SatSunOvertime for e in non_hourly))
+            ws.cell(r, 7, -sum(e.AnnualHoliday for e in non_hourly))
+            ws.cell(r, 8, -sum(e.TotalPaidHours for e in non_hourly))
+            r += 1
+    if r > cat_data_start:
+        _apply_table_style(ws, header_row, r - 1, 1, _SHEET_LAST_COL, header_row=header_row)
+    else:
+        _apply_table_style(ws, header_row, header_row, 1, _SHEET_LAST_COL, header_row=header_row)
+    return r + 1
+
+
 def build_monthly_excel_bytes(
     week_summaries: list[MonthlyWeekSummary],
     non_hourly_names: set[str] | None = None,
@@ -578,29 +909,31 @@ def build_monthly_excel_bytes(
     wb.remove(wb.active)
 
     grouped_from_weeks: list[dict[str, MonthlyEmployeeTotal]] = []
-    week_emp_agency_list: list[dict[str, dict[str, float]]] = []
+    week_layouts: list[WeekSheetLayout] = []
 
     for i, s in enumerate(week_summaries, start=1):
         if not s.emp_agency_bands:
             _enrich_week_summary(s)
-        week_emp_agency_list.append(s.emp_agency_bands)
-
-        ws = wb.create_sheet(f"Week{i}")
+        sheet_name = f"Week{i}"
+        ws = wb.create_sheet(sheet_name)
         r = _write_sheet_banner(ws, f"Gazebo HR — Week {i}", s.start_date, s.end_date)
-        r = _write_employee_table(
+        emp_layout = _write_employee_table_source(
             ws,
             r,
             s.employees,
             f"Week {i} — Employee paid hours",
             "One row per employee for this pay week (from weekly export).",
         )
+        r = emp_layout.next_row
         r = _write_adjustments_table(ws, r, s.adjustments)
-        r = _write_totals_table(
+        categories = [t.Category for t in s.employee_totals]
+        r = _write_totals_table_formulas(
             ws,
             r,
-            [(t.Category, t) for t in s.employee_totals],
+            categories,
+            emp_layout,
             "Category totals",
-            "Sum of hours by work category for this week.",
+            "Sum of hours by work category for this week (SUMIFS from employee rows above).",
         )
         grouped_rows = [(k, s.grouped_totals[k]) for k in sorted(s.grouped_totals.keys())]
         r = _write_totals_table(
@@ -610,13 +943,14 @@ def build_monthly_excel_bytes(
             "Grouped totals (by category prefix)",
             "Categories rolled up to 4-character groups.",
         )
-        r = _write_emp_agency_section(
+        emp_agency = _write_emp_agency_section_formulas(
             ws,
             r,
-            s.emp_agency_bands,
+            emp_layout,
             "Gazebo vs agency summary",
-            "EMP = Gazebo staff; AGENCY = A- categories; TOTAL = both.",
+            "EMP = Gazebo staff; AGENCY = A- categories; TOTAL = both (formulas from employee table).",
         )
+        week_layouts.append(WeekSheetLayout(sheet_name=sheet_name, employee=emp_layout, emp_agency=emp_agency))
         grouped_from_weeks.append(s.grouped_totals)
 
     merged_employees: dict[str, MonthlyEmployee] = {}
@@ -653,43 +987,27 @@ def build_monthly_excel_bytes(
         if not e.IsHourly and e.Category.strip().startswith("A-"):
             raise ValueError(f"Agency employee cannot be non-hourly: {e.Name}")
 
+    week_sheet_names = [wl.sheet_name for wl in week_layouts]
     summary_start = week_summaries[0].start_date if week_summaries else ""
     summary_end = week_summaries[-1].end_date if week_summaries else ""
     ws = wb.create_sheet("Summary")
     r = _write_sheet_banner(ws, "Gazebo HR — Monthly Summary", summary_start, summary_end)
-    r = _write_employee_table(
+    summary_emp_layout = _write_employee_table_cross_week(
         ws,
         r,
         list(merged_employees.values()),
         "Monthly summary — all employees (weeks combined)",
         "Total paid hours per employee across all uploaded weeks.",
+        week_sheet_names,
     )
-
-    r = _write_section_title(ws, r, "Category totals (month)", "Sum of hours by work category for the full month.")
-    header_row = r
-    _write_total_header(ws, r)
-    r += 1
-    cat_data_start = r
-    for t in merged_totals.values():
-        _write_total_row(ws, r, t.Category, t)
-        r += 1
-        non_hourly = [
-            e for e in merged_employees.values()
-            if not e.IsHourly and e.Category.upper() == t.Category.upper()
-        ]
-        if non_hourly:
-            ws.cell(r, 2, f"{t.Category} non-hourly hours")
-            ws.cell(r, 4, -sum(e.BasicHours for e in non_hourly))
-            ws.cell(r, 5, -sum(e.MonFriOvertime for e in non_hourly))
-            ws.cell(r, 6, -sum(e.SatSunOvertime for e in non_hourly))
-            ws.cell(r, 7, -sum(e.AnnualHoliday for e in non_hourly))
-            ws.cell(r, 8, -sum(e.TotalPaidHours for e in non_hourly))
-            r += 1
-    if r > cat_data_start:
-        _apply_table_style(ws, header_row, r - 1, 1, _SHEET_LAST_COL, header_row=header_row)
-    else:
-        _apply_table_style(ws, header_row, header_row, 1, _SHEET_LAST_COL, header_row=header_row)
-    r += 1
+    r = summary_emp_layout.next_row
+    r = _write_summary_category_formulas(
+        ws,
+        r,
+        list(merged_totals.keys()),
+        summary_emp_layout,
+        merged_employees,
+    )
 
     agg_grouped: dict[str, MonthlyEmployeeTotal] = {}
     for m in grouped_from_weeks:
@@ -711,49 +1029,37 @@ def build_monthly_excel_bytes(
         "Categories rolled up to 4-character groups across all weeks.",
     )
 
-    if week_emp_agency_list:
-        monthly_bands = _sum_emp_agency_bands(week_emp_agency_list)
-        r = _write_emp_agency_section(
+    if week_layouts:
+        r, monthly_layout = _write_emp_agency_section_monthly_formulas(
             ws,
             r,
-            monthly_bands,
+            week_layouts,
             "Month total — Gazebo vs agency",
             "Sum of weekly EMP/AGENCY/TOTAL rows across all uploaded weeks.",
-            row_label="MONTHLY",
         )
 
         r = _write_section_title(
             ws,
             r,
             "Per-week Gazebo vs agency",
-            "EMP/AGENCY/TOTAL breakdown for each uploaded week.",
+            "Each row references the matching EMP/AGENCY/TOTAL cells on the Week sheet.",
         )
-        for wi, bands in enumerate(week_emp_agency_list):
+        for wi, layout in enumerate(week_layouts):
             label = "Weekly" if wi == 0 else None
             header_row = r
             _write_total_header(ws, r)
             r += 1
-            r = _write_emp_agency_block(ws, r, bands, row_label=label)
+            r = _write_emp_agency_block_week_refs(ws, r, layout, row_label=label)
             _apply_table_style(ws, header_row, header_row, 2, _SHEET_LAST_COL, header_row=header_row)
             r += 1
 
-        merged_month = _compute_emp_agency_bands(list(merged_employees.values()))
-        week_total_sum = _empty_bands()
-        for bands in week_emp_agency_list:
-            for k in _BAND_KEYS:
-                week_total_sum[k] += float(bands.get("TOTAL", {}).get(k, 0.0) or 0.0)
-        diff_bands = {
-            "EMP": {k: merged_month["EMP"][k] - monthly_bands["EMP"][k] for k in _BAND_KEYS},
-            "AGENCY": {k: merged_month["AGENCY"][k] - monthly_bands["AGENCY"][k] for k in _BAND_KEYS},
-            "TOTAL": {k: merged_month["TOTAL"][k] - week_total_sum[k] for k in _BAND_KEYS},
-        }
-        r = _write_emp_agency_section(
+        r = _write_emp_agency_section_diff_formulas(
             ws,
             r,
-            diff_bands,
+            summary_emp_layout,
+            monthly_layout,
             "Reconciliation difference",
-            "Merged employees vs sum of weeks (should be zero or explainable).",
-            row_label="Diff",
+            "Merged (employees) minus MONTHLY row — EMP, AGENCY and TOTAL should all be zero.",
         )
 
     out = BytesIO()
