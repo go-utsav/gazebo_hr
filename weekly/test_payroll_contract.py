@@ -349,6 +349,7 @@ class BuildExcelNewSheetsTest(unittest.TestCase):
 
 _MONTH_DIR = Path(__file__).resolve().parent.parent / "data" / "month"
 _GAZEBO_WEEKLY_XLSX = _MONTH_DIR / "gazebo_weekly_report_20260522-1401.xlsx"
+_NEW_GAZEBO_WEEKLY_XLSX = _MONTH_DIR / "new_input_file/gazebo_weekly_report_20260605-1205.xlsx"
 _MONTHLY_REF = _MONTH_DIR / "EXCEL_MONHTLY_MAY2026.xls"
 
 _DATA = Path(__file__).resolve().parent.parent / "data"
@@ -577,6 +578,36 @@ class MonthlyGazeboAllDataTest(unittest.TestCase):
             if isinstance(ws.cell(r, 4).value, str) and str(ws.cell(r, 4).value).startswith("=SUMIFS")
         )
         self.assertIn("$B$", str(ws.cell(cat_row, 4).value))
+        wb.close()
+
+
+@unittest.skipUnless(_NEW_GAZEBO_WEEKLY_XLSX.is_file(), "data/month/new_input_file fixture not in repo")
+class NewGazeboWeeklyInputTest(unittest.TestCase):
+    def test_parse_new_weekly_export(self) -> None:
+        from .monthly_service import parse_weekly_gazebo_all_data
+
+        with _NEW_GAZEBO_WEEKLY_XLSX.open("rb") as f:
+            s = parse_weekly_gazebo_all_data(f, start_date="01/06/2026", end_date="07/06/2026")
+        self.assertEqual(len(s.employees), 190)
+        self.assertEqual(s.employees[-1].Name, "SURENDRAN SUBRAMANI")
+        self.assertAlmostEqual(s.emp_agency_bands["TOTAL"]["TotalPaidHours"], 5557.75, places=2)
+
+    def test_build_monthly_workbook_from_new_export(self) -> None:
+        from .monthly_service import build_monthly_excel_bytes, parse_weekly_gazebo_all_data
+
+        with _NEW_GAZEBO_WEEKLY_XLSX.open("rb") as f:
+            week = parse_weekly_gazebo_all_data(f)
+        data = build_monthly_excel_bytes([week, week, week, week])
+        wb = load_workbook(BytesIO(data), read_only=True)
+        ws = wb["Summary"]
+        labels = {ws.cell(r, 2).value for r in range(1, ws.max_row + 1) if ws.cell(r, 2).value}
+        self.assertIn("MONTHLY", labels)
+        self.assertIn("Diff", labels)
+        monthly_emp_row = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 2).value == "MONTHLY")
+        monthly_total_formula = str(ws.cell(monthly_emp_row, 8).value)
+        self.assertTrue(monthly_total_formula.startswith("="))
+        self.assertIn("'Week1'!", monthly_total_formula)
+        self.assertIn("'Week4'!", monthly_total_formula)
         wb.close()
 
 

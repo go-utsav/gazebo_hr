@@ -412,6 +412,13 @@ def monthly_report(request: HttpRequest):
 				end = (request.POST.get(f'week{n}_end') or '').strip()
 				week_dates.append((start, end))
 			summaries = parse_monthly_inputs(files, week_dates=week_dates)
+			for wi, s in enumerate(summaries, start=1):
+				if not s.employees:
+					messages.error(
+						request,
+						f'Week {wi}: no employees found in All Data — check file format.',
+					)
+					return redirect('weekly:monthly_report')
 			non_hourly = _parse_non_hourly_names(request.POST.get('non_hourly_names', ''))
 			for s in summaries:
 				for e in s.employees:
